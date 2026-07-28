@@ -1,0 +1,6 @@
+{
+  "name": "KMZ Pin Renamer",
+  "description": "Upload a KMZ file, match pins styled with PointStyleMap20, and prepend a Project ID to their labels.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
