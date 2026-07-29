@@ -115,6 +115,15 @@ export function detectPinColor(styleUrl: string, iconHref: string): string {
 }
 
 /**
+ * Strips the study prefix from a pin name (e.g. ATR-001 -> 001).
+ * It removes leading alphabets followed by standard separators.
+ */
+export function stripStudyPrefix(name: string): string {
+  const stripped = name.replace(/^[a-zA-Z]+[-_ \s]+/, '');
+  return stripped.trim() !== '' ? stripped : name;
+}
+
+/**
  * Checks if a pin is a camera/movie icon.
  */
 export function isCameraIcon(name: string, iconHref: string): boolean {
@@ -231,7 +240,8 @@ export async function parseKMZFile(
   renameCameras: boolean = false,
   cameraPrefix: string = '',
   useMultiProject: boolean = false,
-  projectIds: string[] = []
+  projectIds: string[] = [],
+  stripStudy: boolean = false
 ): Promise<KMZData> {
   try {
     const zip = await JSZip.loadAsync(file);
@@ -357,8 +367,14 @@ export async function parseKMZFile(
         isMatch = checkIsMatch(styleUrl, iconHref, targetStyle, hasPointGeom, isCamera);
         if (isMatch && activeProjectId.trim() !== '') {
           const cleanId = activeProjectId.trim();
-          if (!name.startsWith(`${cleanId}-`)) {
-            previewName = `${cleanId}-${name}`;
+          let baseName = name;
+          if (stripStudy) {
+            baseName = stripStudyPrefix(name);
+          }
+          if (!baseName.startsWith(`${cleanId}-`)) {
+            previewName = `${cleanId}-${baseName}`;
+          } else {
+            previewName = baseName;
           }
         }
       }
@@ -410,7 +426,8 @@ export function updatePinPreviews(
   renameCameras: boolean = false,
   cameraPrefix: string = '',
   useMultiProject: boolean = false,
-  projectIds: string[] = []
+  projectIds: string[] = [],
+  stripStudy: boolean = false
 ): PlacemarkPin[] {
   return pins.map(pin => {
     let isMatch = false;
@@ -439,8 +456,14 @@ export function updatePinPreviews(
       isMatch = checkIsMatch(pin.styleUrl, pin.iconHref, targetStyle, pin.hasPointGeom, pin.isCamera);
       if (isMatch && activeProjectId.trim() !== '') {
         const cleanId = activeProjectId.trim();
-        if (!pin.name.startsWith(`${cleanId}-`)) {
-          previewName = `${cleanId}-${pin.name}`;
+        let baseName = pin.name;
+        if (stripStudy) {
+          baseName = stripStudyPrefix(pin.name);
+        }
+        if (!baseName.startsWith(`${cleanId}-`)) {
+          previewName = `${cleanId}-${baseName}`;
+        } else {
+          previewName = baseName;
         }
       }
     }
@@ -465,7 +488,8 @@ export async function processAndGenerateKMZ(
   renameCameras: boolean = false,
   cameraPrefix: string = '',
   useMultiProject: boolean = false,
-  projectIds: string[] = []
+  projectIds: string[] = [],
+  stripStudy: boolean = false
 ): Promise<Blob> {
   // Clone the XML document to avoid modifying the original parsed in-memory instance
   const docClone = xmlDoc.cloneNode(true) as Document;
@@ -553,8 +577,14 @@ export async function processAndGenerateKMZ(
       if (checkIsMatch(styleUrlText, iconHref, targetStyle, hasPointGeom, isCamera)) {
         if (nameNode && activeProjectId !== '') {
           const originalName = nameText;
-          if (!originalName.startsWith(`${activeProjectId}-`)) {
-            nameNode.textContent = `${activeProjectId}-${originalName}`;
+          let baseName = originalName;
+          if (stripStudy) {
+            baseName = stripStudyPrefix(originalName);
+          }
+          if (!baseName.startsWith(`${activeProjectId}-`)) {
+            nameNode.textContent = `${activeProjectId}-${baseName}`;
+          } else {
+            nameNode.textContent = baseName;
           }
         }
       }
