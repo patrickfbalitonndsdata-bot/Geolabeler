@@ -33,6 +33,11 @@ export default function App() {
   const [renameCameras, setRenameCameras] = useState(false);
   const [cameraPrefix, setCameraPrefix] = useState('CAM');
   
+  // Multi-Project States
+  const [useMultiProject, setUseMultiProject] = useState(false);
+  const [projectCount, setProjectCount] = useState(2);
+  const [projectIds, setProjectIds] = useState<string[]>(() => Array(10).fill(''));
+  
   const [kmzData, setKmzData] = useState<KMZData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -42,6 +47,27 @@ export default function App() {
   const [isSuccess, setIsSuccess] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [selectedPinId, setSelectedPinId] = useState<string | null>(null);
+
+  // Find all unique folders with pins that exist in the loaded KMZ
+  const detectedFolders = kmzData
+    ? Array.from(
+        new Map<number, string>(
+          kmzData.pins
+            .filter((p): p is typeof p & { folderIndex: number } => p.folderIndex !== undefined && p.folderIndex >= 0)
+            .map(p => [p.folderIndex, p.folderName || `Folder ${p.folderIndex + 1}`])
+        ).entries()
+      )
+        .sort((a, b) => a[0] - b[0])
+        .map(([index, name]) => ({ index, name }))
+    : [];
+
+  const handleProjectIdChange = (index: number, value: string) => {
+    setProjectIds(prev => {
+      const updated = [...prev];
+      updated[index] = value;
+      return updated;
+    });
+  };
 
   // Parse file whenever a new one is selected
   const handleFileSelect = async (file: File) => {
@@ -53,7 +79,15 @@ export default function App() {
     setSelectedPinId(null);
 
     try {
-      const data = await parseKMZFile(file, targetStyle, projectId, renameCameras, cameraPrefix);
+      const data = await parseKMZFile(
+        file, 
+        targetStyle, 
+        projectId, 
+        renameCameras, 
+        cameraPrefix,
+        useMultiProject,
+        projectIds
+      );
       setKmzData(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to parse KMZ file.');
@@ -73,16 +107,24 @@ export default function App() {
     setSelectedPinId(null);
   };
 
-  // Re-calculate previews whenever Project ID, Target Style, renameCameras, or cameraPrefix changes
+  // Re-calculate previews whenever Project ID, Target Style, renameCameras, cameraPrefix, useMultiProject, or projectIds change
   useEffect(() => {
     if (kmzData) {
-      const updatedPins = updatePinPreviews(kmzData.pins, projectId, targetStyle, renameCameras, cameraPrefix);
+      const updatedPins = updatePinPreviews(
+        kmzData.pins, 
+        projectId, 
+        targetStyle, 
+        renameCameras, 
+        cameraPrefix,
+        useMultiProject,
+        projectIds
+      );
       setKmzData({
         ...kmzData,
         pins: updatedPins,
       });
     }
-  }, [projectId, targetStyle, renameCameras, cameraPrefix]);
+  }, [projectId, targetStyle, renameCameras, cameraPrefix, useMultiProject, JSON.stringify(projectIds)]);
 
   // Execute processing & rename
   const handleProcessFile = async () => {
@@ -99,7 +141,9 @@ export default function App() {
         projectId,
         targetStyle,
         renameCameras,
-        cameraPrefix
+        cameraPrefix,
+        useMultiProject,
+        projectIds
       );
       setProcessedBlob(blob);
       setIsSuccess(true);
@@ -115,9 +159,18 @@ export default function App() {
     if (!processedBlob || !selectedFile) return;
 
     // Create download link
-    const cleanId = projectId.trim().replace(/[^a-zA-Z0-9-_]/g, '_');
+    let prefix = projectId.trim();
+    if (useMultiProject) {
+      const firstActiveId = projectIds.find(id => id.trim() !== '');
+      if (firstActiveId) {
+        prefix = firstActiveId.trim();
+      } else {
+        prefix = 'multi_project';
+      }
+    }
+    const cleanPrefix = prefix.replace(/[^a-zA-Z0-9-_]/g, '_');
     const originalNameWithoutExt = selectedFile.name.replace(/\.kmz$/i, '');
-    const outputFilename = `${cleanId}_${originalNameWithoutExt}.kmz`;
+    const outputFilename = `${cleanPrefix || 'labeled'}_${originalNameWithoutExt}.kmz`;
 
     const url = URL.createObjectURL(processedBlob);
     const link = document.createElement('a');
@@ -174,7 +227,7 @@ export default function App() {
             </div>
             <div>
               <h1 className="text-base font-bold text-white tracking-tight">
-                GEO-ID <span className="text-cyan-400 font-normal">RENAMER</span>
+                GEO-ID <span className="text-cyan-400 font-normal">LABELER</span>
               </h1>
               <p className="text-[10px] text-slate-500 uppercase tracking-widest font-semibold">KMZ file Pushpin Project Naming Application</p>
             </div>
@@ -204,39 +257,148 @@ export default function App() {
               </h2>
             </div>
 
-            {/* Input 1: Project number ID */}
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label htmlFor="project-id-input" className="text-xs text-slate-400 ml-1">
-                  Project Number ID
-                </label>
-                <span className="text-[10px] font-bold text-cyan-400 bg-cyan-950/30 border border-cyan-900/30 px-1.5 py-0.5 rounded-full">
-                  Required
-                </span>
-              </div>
-              <input
-                id="project-id-input"
-                type="text"
-                value={projectId}
-                onChange={(e) => setProjectId(e.target.value)}
-                placeholder="e.g. 26-999999"
-                className="w-full bg-slate-900 border border-slate-750 rounded-lg py-2.5 px-4 text-cyan-400 font-mono focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/20 outline-none shadow-inner text-xs"
-              />
-              <div className="flex items-center justify-between text-[10px] text-slate-500">
-                <span>Suffix prepended to matched pins.</span>
-                <div className="flex items-center space-x-1.5">
-                  <span className="font-medium text-slate-600">Preset:</span>
-                  <button
-                    id="preset-id-btn"
-                    type="button"
-                    onClick={() => applyPresetId('26-999999')}
-                    className="text-cyan-400 hover:text-cyan-300 hover:underline font-mono"
-                  >
-                    26-999999
-                  </button>
-                </div>
-              </div>
-            </div>
+             {/* Related Projects (Multi-Project Folders) Toggle */}
+             <div className="bg-slate-900/40 border border-slate-800/60 rounded-lg p-3 space-y-2.5">
+               <div className="flex items-center justify-between">
+                 <div className="flex flex-col">
+                   <span className="text-xs font-semibold text-slate-300">Related Projects (Folders)</span>
+                   <span className="text-[10px] text-slate-500">Map multiple sequential folders to different project IDs</span>
+                 </div>
+                 <label htmlFor="multi-project-toggle" className="relative inline-flex items-center cursor-pointer">
+                   <input
+                     id="multi-project-toggle"
+                     type="checkbox"
+                     checked={useMultiProject}
+                     onChange={(e) => setUseMultiProject(e.target.checked)}
+                     className="sr-only peer"
+                   />
+                   <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-slate-400 after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-cyan-500 peer-checked:after:bg-slate-950 peer-checked:after:border-transparent"></div>
+                 </label>
+               </div>
+
+               <AnimatePresence>
+                 {useMultiProject && (
+                   <motion.div
+                     initial={{ opacity: 0, height: 0 }}
+                     animate={{ opacity: 1, height: 'auto' }}
+                     exit={{ opacity: 0, height: 0 }}
+                     transition={{ duration: 0.15 }}
+                     className="overflow-hidden space-y-3 pt-2 border-t border-slate-800/50 mt-1"
+                   >
+                     <div className="flex items-center justify-between">
+                       <label htmlFor="project-count-select" className="text-[10px] font-semibold text-slate-400 block">
+                         Number of Projects (Max 10)
+                       </label>
+                       <select
+                         id="project-count-select"
+                         value={projectCount}
+                         onChange={(e) => setProjectCount(Math.min(10, Math.max(2, parseInt(e.target.value) || 2)))}
+                         className="bg-slate-950 border border-slate-800 text-cyan-400 font-mono rounded px-2 py-1 text-xs outline-none focus:border-cyan-500"
+                       >
+                         {[2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => (
+                           <option key={n} value={n}>{n} Projects</option>
+                         ))}
+                       </select>
+                     </div>
+
+                     {/* Detected folders helper info */}
+                     {kmzData && detectedFolders.length > 0 && (
+                       <div className="text-[9px] bg-slate-950/40 p-2.5 rounded border border-slate-800 text-slate-400">
+                         <span className="font-semibold text-slate-300 block mb-1">📁 Detected Folders with Pins:</span>
+                         <div className="space-y-1 font-mono">
+                           {detectedFolders.map((folder, idx) => (
+                             <div key={folder.index} className="flex items-center justify-between">
+                               <span className="truncate max-w-[150px]">Folder #{idx + 1}: <strong className="text-slate-300 font-sans">{folder.name}</strong></span>
+                               {idx < projectCount ? (
+                                 <span className="text-cyan-400 font-bold text-[8px] bg-cyan-950/30 border border-cyan-900/30 px-1 py-0.2 rounded">Mapped to ID #{idx + 1}</span>
+                               ) : (
+                                 <span className="text-slate-600 text-[8px]">Will not be renamed</span>
+                               )}
+                             </div>
+                           ))}
+                         </div>
+                       </div>
+                     )}
+
+                     {/* Dynamic Project ID input boxes */}
+                     <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
+                       {Array.from({ length: projectCount }).map((_, index) => {
+                         const hasFolder = detectedFolders[index];
+                         return (
+                           <div key={index} className="space-y-1">
+                             <div className="flex items-center justify-between">
+                               <label htmlFor={`project-id-input-${index}`} className="text-[10px] text-slate-400 flex items-center font-semibold">
+                                 <span className="w-4 h-4 rounded-full bg-slate-800 text-cyan-400 flex items-center justify-center font-mono text-[9px] mr-1.5 font-bold">
+                                   {index + 1}
+                                 </span>
+                                 Project ID #{index + 1}
+                               </label>
+                               {hasFolder && (
+                                 <span className="text-[9px] text-cyan-400 max-w-[130px] truncate font-sans font-medium" title={hasFolder.name}>
+                                   📁 {hasFolder.name}
+                                 </span>
+                               )}
+                             </div>
+                             <input
+                               id={`project-id-input-${index}`}
+                               type="text"
+                               value={projectIds[index] || ''}
+                               onChange={(e) => handleProjectIdChange(index, e.target.value)}
+                               placeholder={`e.g. 26-${999900 + index}`}
+                               className="w-full bg-slate-950 border border-slate-800 rounded-md py-1.5 px-3 text-cyan-400 font-mono focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/20 outline-none text-xs"
+                             />
+                           </div>
+                         );
+                       })}
+                     </div>
+                   </motion.div>
+                 )}
+               </AnimatePresence>
+             </div>
+
+             {/* Input 1: Project number ID */}
+             <AnimatePresence>
+               {!useMultiProject && (
+                 <motion.div
+                   initial={{ opacity: 0, height: 0 }}
+                   animate={{ opacity: 1, height: 'auto' }}
+                   exit={{ opacity: 0, height: 0 }}
+                   transition={{ duration: 0.15 }}
+                   className="space-y-1.5 overflow-hidden"
+                 >
+                   <div className="flex items-center justify-between">
+                     <label htmlFor="project-id-input" className="text-xs text-slate-400 ml-1">
+                       Project Number ID
+                     </label>
+                     <span className="text-[10px] font-bold text-cyan-400 bg-cyan-950/30 border border-cyan-900/30 px-1.5 py-0.5 rounded-full">
+                       Required
+                     </span>
+                   </div>
+                   <input
+                     id="project-id-input"
+                     type="text"
+                     value={projectId}
+                     onChange={(e) => setProjectId(e.target.value)}
+                     placeholder="e.g. 26-999999"
+                     className="w-full bg-slate-900 border border-slate-750 rounded-lg py-2.5 px-4 text-cyan-400 font-mono focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/20 outline-none shadow-inner text-xs"
+                   />
+                   <div className="flex items-center justify-between text-[10px] text-slate-500">
+                     <span>Suffix prepended to matched pins.</span>
+                     <div className="flex items-center space-x-1.5">
+                       <span className="font-medium text-slate-600">Preset:</span>
+                       <button
+                         id="preset-id-btn"
+                         type="button"
+                         onClick={() => applyPresetId('26-999999')}
+                         className="text-cyan-400 hover:text-cyan-300 hover:underline font-mono"
+                       >
+                         26-999999
+                       </button>
+                     </div>
+                   </div>
+                 </motion.div>
+               )}
+             </AnimatePresence>
 
             {/* Input 1b: Camera Pins Renaming option */}
             <div className="bg-slate-900/40 border border-slate-800/60 rounded-lg p-3 space-y-2.5">
@@ -372,9 +534,18 @@ export default function App() {
                     exit={{ opacity: 0 }}
                     type="button"
                     onClick={handleProcessFile}
-                    disabled={!kmzData || isProcessing || (!projectId.trim() && (!renameCameras || !cameraPrefix.trim()))}
+                    disabled={
+                      !kmzData || 
+                      isProcessing || 
+                      (useMultiProject 
+                        ? (projectIds.slice(0, projectCount).every(id => !id.trim()) && (!renameCameras || !cameraPrefix.trim()))
+                        : (!projectId.trim() && (!renameCameras || !cameraPrefix.trim())))
+                    }
                     className={`w-full py-3.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
-                      !kmzData || (!projectId.trim() && (!renameCameras || !cameraPrefix.trim()))
+                      !kmzData || 
+                      (useMultiProject 
+                        ? (projectIds.slice(0, projectCount).every(id => !id.trim()) && (!renameCameras || !cameraPrefix.trim()))
+                        : (!projectId.trim() && (!renameCameras || !cameraPrefix.trim())))
                         ? 'bg-slate-900/50 text-slate-500 border border-slate-800 cursor-not-allowed'
                         : 'bg-cyan-600 hover:bg-cyan-500 text-slate-950 shadow-[0_0_20px_rgba(6,182,212,0.3)] hover:scale-[1.01] active:scale-[0.99] cursor-pointer'
                     }`}
@@ -402,7 +573,11 @@ export default function App() {
                     <div className="flex items-start space-x-2 p-3 bg-emerald-950/20 text-emerald-300 rounded-lg text-xs border border-emerald-900/30 font-medium">
                       <CheckCircle2 className="w-4.5 h-4.5 text-emerald-400 shrink-0 mt-0.5 shadow-[0_0_10px_rgba(16,185,129,0.2)]" />
                       <span>
-                        Successfully processed KMZ file! Matched pins renamed with prefix <strong>"{projectId}"</strong>.
+                        {useMultiProject ? (
+                          <>Successfully processed KMZ file! Sequential folders renamed and mapped to project IDs.</>
+                        ) : (
+                          <>Successfully processed KMZ file! Matched pins renamed with prefix <strong>"{projectId}"</strong>.</>
+                        )}
                       </span>
                     </div>
 
@@ -514,8 +689,8 @@ export default function App() {
       <footer id="app-footer" className="bg-slate-950 border-t border-slate-800 py-4 shrink-0 text-center text-xs text-slate-500 relative z-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="text-center sm:text-left">
-            <p>© 2026 GEO-ID RENAMER. Powered by React, Vite and Tailwind. All unzipping and processing happens securely inside your browser.</p>
-            <p className="text-[11px] text-slate-600 mt-1">Developed by <span className="text-cyan-500/90 font-semibold">Patrick Franz O.B. and John Mervin B.</span></p>
+            <p>© 2026 GEO-ID LABELER. Powered by React, Vite and Tailwind. All unzipping and processing happens securely inside your browser.</p>
+            <p className="text-[11px] text-slate-600 mt-1">Developed by <span className="text-cyan-500/90 font-semibold">Patrick Franz O.B.</span></p>
           </div>
           <div className="flex gap-6 uppercase font-bold text-[10px]">
             <span className="text-slate-600">Terms</span>
