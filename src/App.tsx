@@ -32,6 +32,7 @@ export default function App() {
   const [targetStyle, setTargetStyle] = useState('PointStyleMap20');
   const [renameCameras, setRenameCameras] = useState(false);
   const [cameraPrefix, setCameraPrefix] = useState('CAM');
+  const [stripStudy, setStripStudy] = useState(false);
   
   // Multi-Project States
   const [useMultiProject, setUseMultiProject] = useState(false);
@@ -86,7 +87,8 @@ export default function App() {
         renameCameras, 
         cameraPrefix,
         useMultiProject,
-        projectIds
+        projectIds,
+        stripStudy
       );
       setKmzData(data);
     } catch (err) {
@@ -107,7 +109,7 @@ export default function App() {
     setSelectedPinId(null);
   };
 
-  // Re-calculate previews whenever Project ID, Target Style, renameCameras, cameraPrefix, useMultiProject, or projectIds change
+  // Re-calculate previews whenever Project ID, Target Style, renameCameras, cameraPrefix, useMultiProject, projectIds, or stripStudy change
   useEffect(() => {
     if (kmzData) {
       const updatedPins = updatePinPreviews(
@@ -117,14 +119,15 @@ export default function App() {
         renameCameras, 
         cameraPrefix,
         useMultiProject,
-        projectIds
+        projectIds,
+        stripStudy
       );
       setKmzData({
         ...kmzData,
         pins: updatedPins,
       });
     }
-  }, [projectId, targetStyle, renameCameras, cameraPrefix, useMultiProject, JSON.stringify(projectIds)]);
+  }, [projectId, targetStyle, renameCameras, cameraPrefix, useMultiProject, JSON.stringify(projectIds), stripStudy]);
 
   // Execute processing & rename
   const handleProcessFile = async () => {
@@ -143,7 +146,8 @@ export default function App() {
         renameCameras,
         cameraPrefix,
         useMultiProject,
-        projectIds
+        projectIds,
+        stripStudy
       );
       setProcessedBlob(blob);
       setIsSuccess(true);
@@ -227,7 +231,7 @@ export default function App() {
             </div>
             <div>
               <h1 className="text-base font-bold text-white tracking-tight">
-                GEO-ID <span className="text-cyan-400 font-normal">RENAMER</span>
+                GEO-ID <span className="text-cyan-400 font-normal">LABELER</span>
               </h1>
               <p className="text-[10px] text-slate-500 uppercase tracking-widest font-semibold">KMZ file Pushpin Project Naming Application</p>
             </div>
@@ -442,6 +446,40 @@ export default function App() {
                     <p className="text-[9px] text-slate-500">
                       Prefix prepended to camera labels. E.g. <span className="font-mono text-emerald-400">CAM-CAM 7099</span>
                     </p>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
+            {/* Input 1c: No Study Label option */}
+            <div className="bg-slate-900/40 border border-slate-800/60 rounded-lg p-3 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex flex-col">
+                  <span className="text-xs font-semibold text-slate-300">No Study Label</span>
+                  <span className="text-[10px] text-slate-500">Strip study codes (e.g. ATR, TMC, QUE, etc.) from matched pin names</span>
+                </div>
+                <label htmlFor="strip-study-toggle" className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    id="strip-study-toggle"
+                    type="checkbox"
+                    checked={stripStudy}
+                    onChange={(e) => setStripStudy(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-slate-400 after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-cyan-500 peer-checked:after:bg-slate-950 peer-checked:after:border-transparent"></div>
+                </label>
+              </div>
+              
+              <AnimatePresence>
+                {stripStudy && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    transition={{ duration: 0.15 }}
+                    className="text-[9px] text-slate-400 bg-slate-950/40 p-2 rounded border border-slate-850"
+                  >
+                    E.g. <span className="line-through text-rose-400 font-mono">ATR-001</span> becomes <span className="font-mono text-cyan-400">{projectId.trim() || '26-999999'}-001</span>
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -689,8 +727,8 @@ export default function App() {
       <footer id="app-footer" className="bg-slate-950 border-t border-slate-800 py-4 shrink-0 text-center text-xs text-slate-500 relative z-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="text-center sm:text-left">
-            <p>© 2026 GEO-ID RENAMER. Powered by React, Vite and Tailwind. All unzipping and processing happens securely inside your browser.</p>
-            <p className="text-[11px] text-slate-600 mt-1">Developed by <span className="text-cyan-500/90 font-semibold">Patrick Franz O.B. & John Mervin B.</span></p>
+            <p>© 2026 GEO-ID LABELER. Powered by React, Vite and Tailwind. All unzipping and processing happens securely inside your browser.</p>
+            <p className="text-[11px] text-slate-600 mt-1">Developed by <span className="text-cyan-500/90 font-semibold">Patrick Franz O.B.</span></p>
           </div>
           <div className="flex gap-6 uppercase font-bold text-[10px]">
             <span className="text-slate-600">Terms</span>
