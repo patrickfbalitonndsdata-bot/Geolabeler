@@ -231,7 +231,7 @@ export default function App() {
             </div>
             <div>
               <h1 className="text-base font-bold text-white tracking-tight">
-                GEO-ID <span className="text-cyan-400 font-normal">LABELER</span>
+                GEO-ID <span className="text-cyan-400 font-normal">RENAMER</span>
               </h1>
               <p className="text-[10px] text-slate-500 uppercase tracking-widest font-semibold">KMZ file Pushpin Project Naming Application</p>
             </div>
@@ -727,8 +727,8 @@ export default function App() {
       <footer id="app-footer" className="bg-slate-950 border-t border-slate-800 py-4 shrink-0 text-center text-xs text-slate-500 relative z-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="text-center sm:text-left">
-            <p>© 2026 GEO-ID LABELER. Powered by React, Vite and Tailwind. All unzipping and processing happens securely inside your browser.</p>
-            <p className="text-[11px] text-slate-600 mt-1">Developed by <span className="text-cyan-500/90 font-semibold">Patrick Franz O.B.</span></p>
+            <p>© 2026 GEO-ID RENAMER. Powered by React, Vite and Tailwind. All unzipping and processing happens securely inside your browser.</p>
+            <p className="text-[11px] text-slate-600 mt-1">Developed by <span className="text-cyan-500/90 font-semibold">Patrick Franz O.B. & John Mervin B.</span></p>
           </div>
           <div className="flex gap-6 uppercase font-bold text-[10px]">
             <span className="text-slate-600">Terms</span>
