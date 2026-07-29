@@ -17,6 +17,8 @@ export interface PlacemarkPin {
   description?: string;
   isMatch: boolean;
   previewName: string;
+  folderName?: string;
+  folderIndex?: number;
 }
 
 export interface KmlStyle {
