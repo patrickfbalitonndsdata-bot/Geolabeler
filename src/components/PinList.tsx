@@ -165,7 +165,7 @@ export function PinList({ pins, projectId, selectedPinId, onSelectPin }: PinList
 
                 <div className="min-w-0 flex-1 pr-4">
                   <div className="flex items-center space-x-2">
-                    {pin.isMatch && projectId ? (
+                    {pin.isMatch && pin.previewName !== pin.name ? (
                       <div className="flex items-center space-x-1.5 text-xs font-semibold text-slate-300 truncate">
                         <span className="text-slate-500 line-through truncate max-w-[80px] md:max-w-[120px] inline-block">{pin.name}</span>
                         <ArrowRight className="w-3 h-3 text-cyan-400 shrink-0" />
@@ -179,6 +179,12 @@ export function PinList({ pins, projectId, selectedPinId, onSelectPin }: PinList
                   </div>
                   
                   <div className="flex items-center space-x-2 mt-1 flex-wrap gap-y-1">
+                    {pin.folderName && (
+                      <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-slate-900 text-slate-400 border border-slate-800 flex items-center shrink-0">
+                        <span className="w-1 h-1 rounded-full bg-cyan-400/80 mr-1.5 inline-block"></span>
+                        {pin.folderName}
+                      </span>
+                    )}
                     <span className="font-mono text-[9px] text-slate-400 bg-slate-800 px-1 py-0.5 rounded truncate max-w-[140px]" title={`Style: ${pin.styleUrl}`}>
                       {pin.styleUrl || '(Inline Style)'}
                     </span>
