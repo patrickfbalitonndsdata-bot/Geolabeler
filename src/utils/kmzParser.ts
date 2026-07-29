@@ -208,6 +208,20 @@ export function checkIsMatch(styleUrl: string, iconHref: string, targetStyle: st
 }
 
 /**
+ * Helper to find the closest ancestor element with a specific tag name.
+ */
+export function getClosestAncestor(element: Element, tagName: string): Element | null {
+  let parent = element.parentElement;
+  while (parent) {
+    if (parent.tagName === tagName) {
+      return parent;
+    }
+    parent = parent.parentElement;
+  }
+  return null;
+}
+
+/**
  * Parses a KMZ file, extracts its KML files, and returns rich structured data about pins and styles.
  */
 export async function parseKMZFile(
@@ -215,7 +229,9 @@ export async function parseKMZFile(
   targetStyle: string,
   projectId: string,
   renameCameras: boolean = false,
-  cameraPrefix: string = ''
+  cameraPrefix: string = '',
+  useMultiProject: boolean = false,
+  projectIds: string[] = []
 ): Promise<KMZData> {
   try {
     const zip = await JSZip.loadAsync(file);
@@ -247,6 +263,19 @@ export async function parseKMZFile(
     const placemarkNodes = xmlDoc.getElementsByTagName('Placemark');
     const pins: PlacemarkPin[] = [];
     const stylesMap: Record<string, number> = {};
+    
+    // Identify all unique folders containing pins (Placemarks with Point) in document order
+    const uniqueFolders: Element[] = [];
+    for (let i = 0; i < placemarkNodes.length; i++) {
+      const pm = placemarkNodes[i];
+      const hasPointGeom = pm.getElementsByTagName('Point').length > 0;
+      if (!hasPointGeom) continue;
+      
+      const folder = getClosestAncestor(pm, 'Folder');
+      if (folder && !uniqueFolders.includes(folder)) {
+        uniqueFolders.push(folder);
+      }
+    }
     
     for (let i = 0; i < placemarkNodes.length; i++) {
       const pm = placemarkNodes[i];
@@ -291,6 +320,26 @@ export async function parseKMZFile(
         stylesMap['(No Style)'] = (stylesMap['(No Style)'] || 0) + 1;
       }
       
+      // Folder grouping & index identification
+      const folderElement = getClosestAncestor(pm, 'Folder');
+      let folderName = '';
+      let folderIndex = -1;
+      if (folderElement) {
+        const fNameNode = folderElement.getElementsByTagName('name')[0];
+        folderName = fNameNode ? fNameNode.textContent || '' : 'Unnamed Folder';
+        folderIndex = uniqueFolders.indexOf(folderElement);
+      }
+
+      // Determine active project ID for this pin based on folder structure and settings
+      let activeProjectId = projectId;
+      if (useMultiProject) {
+        if (folderIndex >= 0 && folderIndex < projectIds.length && projectIds[folderIndex].trim() !== '') {
+          activeProjectId = projectIds[folderIndex].trim();
+        } else {
+          activeProjectId = ''; // No prefix if not provided for this folder
+        }
+      }
+
       // Determine match and preview name
       const isCamera = isCameraIcon(name, iconHref);
       let isMatch = false;
@@ -306,8 +355,8 @@ export async function parseKMZFile(
         }
       } else {
         isMatch = checkIsMatch(styleUrl, iconHref, targetStyle, hasPointGeom, isCamera);
-        if (isMatch && projectId.trim() !== '') {
-          const cleanId = projectId.trim();
+        if (isMatch && activeProjectId.trim() !== '') {
+          const cleanId = activeProjectId.trim();
           if (!name.startsWith(`${cleanId}-`)) {
             previewName = `${cleanId}-${name}`;
           }
@@ -326,6 +375,8 @@ export async function parseKMZFile(
         description,
         isMatch,
         previewName,
+        folderName,
+        folderIndex,
       });
     }
     
@@ -350,18 +401,31 @@ export async function parseKMZFile(
 }
 
 /**
- * Re-computes previews for already loaded pins based on new project id and target style.
+ * Re-computes previews for already loaded pins based on new project id, multi-project, and target style settings.
  */
 export function updatePinPreviews(
   pins: PlacemarkPin[],
   projectId: string,
   targetStyle: string,
   renameCameras: boolean = false,
-  cameraPrefix: string = ''
+  cameraPrefix: string = '',
+  useMultiProject: boolean = false,
+  projectIds: string[] = []
 ): PlacemarkPin[] {
   return pins.map(pin => {
     let isMatch = false;
     let previewName = pin.name;
+
+    // Determine active project ID for this pin
+    let activeProjectId = projectId;
+    if (useMultiProject) {
+      const folderIdx = pin.folderIndex !== undefined ? pin.folderIndex : -1;
+      if (folderIdx >= 0 && folderIdx < projectIds.length && projectIds[folderIdx].trim() !== '') {
+        activeProjectId = projectIds[folderIdx].trim();
+      } else {
+        activeProjectId = '';
+      }
+    }
 
     if (pin.isCamera) {
       if (renameCameras && cameraPrefix.trim() !== '') {
@@ -373,8 +437,8 @@ export function updatePinPreviews(
       }
     } else {
       isMatch = checkIsMatch(pin.styleUrl, pin.iconHref, targetStyle, pin.hasPointGeom, pin.isCamera);
-      if (isMatch && projectId.trim() !== '') {
-        const cleanId = projectId.trim();
+      if (isMatch && activeProjectId.trim() !== '') {
+        const cleanId = activeProjectId.trim();
         if (!pin.name.startsWith(`${cleanId}-`)) {
           previewName = `${cleanId}-${pin.name}`;
         }
@@ -399,7 +463,9 @@ export async function processAndGenerateKMZ(
   projectId: string,
   targetStyle: string,
   renameCameras: boolean = false,
-  cameraPrefix: string = ''
+  cameraPrefix: string = '',
+  useMultiProject: boolean = false,
+  projectIds: string[] = []
 ): Promise<Blob> {
   // Clone the XML document to avoid modifying the original parsed in-memory instance
   const docClone = xmlDoc.cloneNode(true) as Document;
@@ -409,6 +475,32 @@ export async function processAndGenerateKMZ(
   
   const placemarkNodes = docClone.getElementsByTagName('Placemark');
   const cleanId = projectId.trim();
+
+  // Identify all unique folders containing point placemarks in document order inside clone
+  const uniqueFolders: Element[] = [];
+  for (let i = 0; i < placemarkNodes.length; i++) {
+    const pm = placemarkNodes[i];
+    const hasPointGeom = pm.getElementsByTagName('Point').length > 0;
+    if (!hasPointGeom) continue;
+    
+    const folder = getClosestAncestor(pm, 'Folder');
+    if (folder && !uniqueFolders.includes(folder)) {
+      uniqueFolders.push(folder);
+    }
+  }
+
+  // Rename folders in XML if multi-project option is enabled
+  if (useMultiProject) {
+    uniqueFolders.forEach((folderElement, index) => {
+      if (index < projectIds.length && projectIds[index].trim() !== '') {
+        const folderId = projectIds[index].trim();
+        const fNameNode = folderElement.getElementsByTagName('name')[0];
+        if (fNameNode) {
+          fNameNode.textContent = folderId;
+        }
+      }
+    });
+  }
   
   for (let i = 0; i < placemarkNodes.length; i++) {
     const pm = placemarkNodes[i];
@@ -432,6 +524,20 @@ export async function processAndGenerateKMZ(
     const styleUrlText = styleUrlNode ? styleUrlNode.textContent || '' : '';
     const iconHref = getPlacemarkIconHref(pm, iconHrefMap);
     const isCamera = isCameraIcon(nameText, iconHref);
+
+    // Determine active project ID for this placemark
+    let activeProjectId = cleanId;
+    if (useMultiProject) {
+      const folderElement = getClosestAncestor(pm, 'Folder');
+      if (folderElement) {
+        const folderIndex = uniqueFolders.indexOf(folderElement);
+        if (folderIndex >= 0 && folderIndex < projectIds.length && projectIds[folderIndex].trim() !== '') {
+          activeProjectId = projectIds[folderIndex].trim();
+        } else {
+          activeProjectId = '';
+        }
+      }
+    }
     
     if (isCamera) {
       if (renameCameras && cameraPrefix.trim() !== '') {
@@ -445,10 +551,10 @@ export async function processAndGenerateKMZ(
       }
     } else {
       if (checkIsMatch(styleUrlText, iconHref, targetStyle, hasPointGeom, isCamera)) {
-        if (nameNode) {
+        if (nameNode && activeProjectId !== '') {
           const originalName = nameText;
-          if (cleanId !== '' && !originalName.startsWith(`${cleanId}-`)) {
-            nameNode.textContent = `${cleanId}-${originalName}`;
+          if (!originalName.startsWith(`${activeProjectId}-`)) {
+            nameNode.textContent = `${activeProjectId}-${originalName}`;
           }
         }
       }
