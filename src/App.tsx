@@ -210,18 +210,18 @@ export default function App() {
             <div className="w-9 h-9 bg-cyan-500 rounded flex items-center justify-center shadow-[0_0_15px_rgba(6,182,212,0.4)] text-slate-900 shrink-0">
               <svg viewBox="0 0 32 32" className="w-6 h-6" fill="none" xmlns="http://www.w3.org/2000/svg">
                 {/* Globe/Geospatial mesh lines */}
-                <circle cx="16" cy="16" r="11" stroke="#0f172a" stroke-width="1.8" />
-                <ellipse cx="16" cy="16" rx="11" ry="4" stroke="#0f172a" stroke-width="1.2" />
-                <line x1="16" y1="5" x2="16" y2="27" stroke="#0f172a" stroke-width="1.2" />
-                <line x1="5" y1="16" x2="27" y2="16" stroke="#0f172a" stroke-width="1.2" />
+                <circle cx="16" cy="16" r="11" stroke="#0f172a" strokeWidth="1.8" />
+                <ellipse cx="16" cy="16" rx="11" ry="4" stroke="#0f172a" strokeWidth="1.2" />
+                <line x1="16" y1="5" x2="16" y2="27" stroke="#0f172a" strokeWidth="1.2" />
+                <line x1="5" y1="16" x2="27" y2="16" stroke="#0f172a" strokeWidth="1.2" />
                 
                 {/* Pencil drawing/labeling tool overlay */}
                 <g transform="translate(3, -3)">
                   <path d="M12,24 L24,12 L26,14 L14,26 Z" fill="#1e293b" opacity="0.3" />
-                  <path d="M11,25 L23,13 L26,16 L14,28 Z" fill="#ffffff" stroke="#0f172a" stroke-width="1.2" />
-                  <path d="M11,25 L8,28 L14,28 Z" fill="#eab308" stroke="#0f172a" stroke-width="1.2" />
+                  <path d="M11,25 L23,13 L26,16 L14,28 Z" fill="#ffffff" stroke="#0f172a" strokeWidth="1.2" />
+                  <path d="M11,25 L8,28 L14,28 Z" fill="#eab308" stroke="#0f172a" strokeWidth="1.2" />
                   <path d="M9.5,26.5 L8,28 L11,26.5 Z" fill="#0f172a" />
-                  <path d="M23,13 L24.5,11.5 C25,11 25.8,11 26.3,11.5 C26.8,12 26.8,12.8 26.3,13.3 L25,14.8 Z" fill="#f43f5e" stroke="#0f172a" stroke-width="1.2" />
+                  <path d="M23,13 L24.5,11.5 C25,11 25.8,11 26.3,11.5 C26.8,12 26.8,12.8 26.3,13.3 L25,14.8 Z" fill="#f43f5e" stroke="#0f172a" strokeWidth="1.2" />
                 </g>
               </svg>
             </div>
