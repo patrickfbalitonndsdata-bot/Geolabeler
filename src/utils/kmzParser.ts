@@ -124,6 +124,45 @@ export function stripStudyPrefix(name: string): string {
 }
 
 /**
+ * Formats the renamed label for a pin according to naming conventions:
+ * - Camera pins: uses space separator, e.g. "CAM 001 MAIN"
+ * - Standard placemarks with No Study Label ON: uses dash separator, e.g. "26-898988-004"
+ * - Standard placemarks with No Study Label OFF: uses space separator, e.g. "26-898988 ATR-004"
+ */
+export function formatRenamedPin(
+  originalName: string,
+  projectId: string,
+  isCamera: boolean,
+  cameraPrefix: string = '',
+  stripStudy: boolean = false
+): string {
+  if (isCamera) {
+    const cleanPrefix = cameraPrefix.trim();
+    if (!cleanPrefix) return originalName;
+    if (originalName.startsWith(`${cleanPrefix} `) || originalName.startsWith(`${cleanPrefix}-`)) {
+      return originalName;
+    }
+    return `${cleanPrefix} ${originalName}`;
+  }
+
+  const cleanId = projectId.trim();
+  if (!cleanId) return originalName;
+
+  if (stripStudy) {
+    const baseName = stripStudyPrefix(originalName);
+    if (baseName.startsWith(`${cleanId}-`)) {
+      return baseName;
+    }
+    return `${cleanId}-${baseName}`;
+  } else {
+    if (originalName.startsWith(`${cleanId} `) || originalName.startsWith(`${cleanId}-`)) {
+      return originalName;
+    }
+    return `${cleanId} ${originalName}`;
+  }
+}
+
+/**
  * Checks if a pin is a camera/movie icon.
  */
 export function isCameraIcon(name: string, iconHref: string): boolean {
@@ -357,25 +396,13 @@ export async function parseKMZFile(
 
       if (isCamera) {
         if (renameCameras && cameraPrefix.trim() !== '') {
-          const cleanPrefix = cameraPrefix.trim();
           isMatch = true;
-          if (!name.startsWith(`${cleanPrefix}-`)) {
-            previewName = `${cleanPrefix}-${name}`;
-          }
+          previewName = formatRenamedPin(name, '', true, cameraPrefix, false);
         }
       } else {
         isMatch = checkIsMatch(styleUrl, iconHref, targetStyle, hasPointGeom, isCamera);
         if (isMatch && activeProjectId.trim() !== '') {
-          const cleanId = activeProjectId.trim();
-          let baseName = name;
-          if (stripStudy) {
-            baseName = stripStudyPrefix(name);
-          }
-          if (!baseName.startsWith(`${cleanId}-`)) {
-            previewName = `${cleanId}-${baseName}`;
-          } else {
-            previewName = baseName;
-          }
+          previewName = formatRenamedPin(name, activeProjectId, false, '', stripStudy);
         }
       }
       
@@ -417,7 +444,7 @@ export async function parseKMZFile(
 }
 
 /**
- * Re-computes previews for already loaded pins based on new project id, multi-project, and target style settings.
+ * Re-computes previews for already loaded pins based on new project id, multi-project, target style settings, and user overrides.
  */
 export function updatePinPreviews(
   pins: PlacemarkPin[],
@@ -430,6 +457,15 @@ export function updatePinPreviews(
   stripStudy: boolean = false
 ): PlacemarkPin[] {
   return pins.map(pin => {
+    // If user explicitly set customPreviewName without override, preserve it
+    if (pin.customPreviewName && pin.customPreviewName.trim() !== '') {
+      return {
+        ...pin,
+        isMatch: pin.userOverride ? pin.userOverride === 'rename' : true,
+        previewName: pin.customPreviewName,
+      };
+    }
+
     let isMatch = false;
     let previewName = pin.name;
 
@@ -446,26 +482,22 @@ export function updatePinPreviews(
 
     if (pin.isCamera) {
       if (renameCameras && cameraPrefix.trim() !== '') {
-        const cleanPrefix = cameraPrefix.trim();
         isMatch = true;
-        if (!pin.name.startsWith(`${cleanPrefix}-`)) {
-          previewName = `${cleanPrefix}-${pin.name}`;
-        }
       }
+      previewName = formatRenamedPin(pin.name, '', true, cameraPrefix, false);
     } else {
       isMatch = checkIsMatch(pin.styleUrl, pin.iconHref, targetStyle, pin.hasPointGeom, pin.isCamera);
-      if (isMatch && activeProjectId.trim() !== '') {
-        const cleanId = activeProjectId.trim();
-        let baseName = pin.name;
-        if (stripStudy) {
-          baseName = stripStudyPrefix(pin.name);
-        }
-        if (!baseName.startsWith(`${cleanId}-`)) {
-          previewName = `${cleanId}-${baseName}`;
-        } else {
-          previewName = baseName;
-        }
+      if (activeProjectId.trim() !== '') {
+        previewName = formatRenamedPin(pin.name, activeProjectId, false, '', stripStudy);
       }
+    }
+
+    // Respect user manual override if set
+    if (pin.userOverride === 'rename') {
+      isMatch = true;
+    } else if (pin.userOverride === 'skip') {
+      isMatch = false;
+      previewName = pin.name;
     }
     
     return {
@@ -489,7 +521,8 @@ export async function processAndGenerateKMZ(
   cameraPrefix: string = '',
   useMultiProject: boolean = false,
   projectIds: string[] = [],
-  stripStudy: boolean = false
+  stripStudy: boolean = false,
+  pins?: PlacemarkPin[]
 ): Promise<Blob> {
   // Clone the XML document to avoid modifying the original parsed in-memory instance
   const docClone = xmlDoc.cloneNode(true) as Document;
@@ -525,6 +558,12 @@ export async function processAndGenerateKMZ(
       }
     });
   }
+
+  // Map of pins by ID for fast lookup if pins array is provided
+  const pinMap = new Map<string, PlacemarkPin>();
+  if (pins) {
+    pins.forEach(p => pinMap.set(p.id, p));
+  }
   
   for (let i = 0; i < placemarkNodes.length; i++) {
     const pm = placemarkNodes[i];
@@ -541,6 +580,22 @@ export async function processAndGenerateKMZ(
                             pm.getElementsByTagName('GroundOverlay').length > 0;
     
     if (!hasPointGeom || isPathOrPolygon || nameText.toLowerCase().includes('untitled path')) {
+      continue;
+    }
+
+    const pinId = `pin-${i}`;
+    const interactivePin = pinMap.get(pinId);
+
+    if (interactivePin) {
+      if (interactivePin.isMatch) {
+        if (nameNode) {
+          nameNode.textContent = interactivePin.customPreviewName || interactivePin.previewName;
+        }
+      } else {
+        if (nameNode) {
+          nameNode.textContent = interactivePin.name;
+        }
+      }
       continue;
     }
     
@@ -565,27 +620,14 @@ export async function processAndGenerateKMZ(
     
     if (isCamera) {
       if (renameCameras && cameraPrefix.trim() !== '') {
-        const cleanPrefix = cameraPrefix.trim();
         if (nameNode) {
-          const originalName = nameText;
-          if (!originalName.startsWith(`${cleanPrefix}-`)) {
-            nameNode.textContent = `${cleanPrefix}-${originalName}`;
-          }
+          nameNode.textContent = formatRenamedPin(nameText, '', true, cameraPrefix, false);
         }
       }
     } else {
       if (checkIsMatch(styleUrlText, iconHref, targetStyle, hasPointGeom, isCamera)) {
         if (nameNode && activeProjectId !== '') {
-          const originalName = nameText;
-          let baseName = originalName;
-          if (stripStudy) {
-            baseName = stripStudyPrefix(originalName);
-          }
-          if (!baseName.startsWith(`${activeProjectId}-`)) {
-            nameNode.textContent = `${activeProjectId}-${baseName}`;
-          } else {
-            nameNode.textContent = baseName;
-          }
+          nameNode.textContent = formatRenamedPin(nameText, activeProjectId, false, '', stripStudy);
         }
       }
     }
