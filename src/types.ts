@@ -19,6 +19,8 @@ export interface PlacemarkPin {
   previewName: string;
   folderName?: string;
   folderIndex?: number;
+  customPreviewName?: string;
+  userOverride?: 'rename' | 'skip';
 }
 
 export interface KmlStyle {
