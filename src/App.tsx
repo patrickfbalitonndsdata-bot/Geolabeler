@@ -23,7 +23,7 @@ import { KMZData } from './types';
 import { UploadZone } from './components/UploadZone';
 import { FileStats } from './components/FileStats';
 import { PinList } from './components/PinList';
-import { parseKMZFile, updatePinPreviews, processAndGenerateKMZ } from './utils/kmzParser';
+import { parseKMZFile, updatePinPreviews, processAndGenerateKMZ, stripStudyPrefix, formatRenamedPin } from './utils/kmzParser';
 
 export default function App() {
   // Application States
@@ -147,7 +147,8 @@ export default function App() {
         cameraPrefix,
         useMultiProject,
         projectIds,
-        stripStudy
+        stripStudy,
+        kmzData.pins
       );
       setProcessedBlob(blob);
       setIsSuccess(true);
@@ -156,6 +157,145 @@ export default function App() {
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  // Interactive Pin Management Handlers
+  const handleTogglePinAction = (pinId: string) => {
+    if (!kmzData) return;
+    setProcessedBlob(null);
+    setIsSuccess(false);
+    
+    setKmzData(prev => {
+      if (!prev) return null;
+      const updatedPins = prev.pins.map(pin => {
+        if (pin.id === pinId) {
+          const nextMatch = !pin.isMatch;
+          const nextOverride: 'rename' | 'skip' = nextMatch ? 'rename' : 'skip';
+          
+          let previewName = pin.name;
+          if (nextMatch) {
+            if (pin.customPreviewName && pin.customPreviewName.trim() !== '') {
+              previewName = pin.customPreviewName;
+            } else if (pin.isCamera) {
+              previewName = formatRenamedPin(pin.name, '', true, cameraPrefix || 'CAM', false);
+            } else {
+              let activeProjectId = projectId.trim();
+              if (useMultiProject) {
+                const folderIdx = pin.folderIndex !== undefined ? pin.folderIndex : -1;
+                if (folderIdx >= 0 && folderIdx < projectIds.length && projectIds[folderIdx].trim() !== '') {
+                  activeProjectId = projectIds[folderIdx].trim();
+                }
+              }
+              previewName = formatRenamedPin(pin.name, activeProjectId, false, '', stripStudy);
+            }
+          }
+
+          return {
+            ...pin,
+            isMatch: nextMatch,
+            userOverride: nextOverride,
+            previewName,
+          };
+        }
+        return pin;
+      });
+      return {
+        ...prev,
+        pins: updatedPins,
+      };
+    });
+  };
+
+  const handleBatchSetPinAction = (pinIds: string[], action: 'rename' | 'skip') => {
+    if (!kmzData) return;
+    setProcessedBlob(null);
+    setIsSuccess(false);
+    const targetSet = new Set(pinIds);
+
+    setKmzData(prev => {
+      if (!prev) return null;
+      const updatedPins = prev.pins.map(pin => {
+        if (targetSet.has(pin.id)) {
+          const nextMatch = action === 'rename';
+          let previewName = pin.name;
+          if (nextMatch) {
+            if (pin.customPreviewName && pin.customPreviewName.trim() !== '') {
+              previewName = pin.customPreviewName;
+            } else if (pin.isCamera) {
+              previewName = formatRenamedPin(pin.name, '', true, cameraPrefix || 'CAM', false);
+            } else {
+              let activeProjectId = projectId.trim();
+              if (useMultiProject) {
+                const folderIdx = pin.folderIndex !== undefined ? pin.folderIndex : -1;
+                if (folderIdx >= 0 && folderIdx < projectIds.length && projectIds[folderIdx].trim() !== '') {
+                  activeProjectId = projectIds[folderIdx].trim();
+                }
+              }
+              previewName = formatRenamedPin(pin.name, activeProjectId, false, '', stripStudy);
+            }
+          }
+          return {
+            ...pin,
+            isMatch: nextMatch,
+            userOverride: action,
+            previewName,
+          };
+        }
+        return pin;
+      });
+      return { ...prev, pins: updatedPins };
+    });
+  };
+
+  const handleSetCustomPinName = (pinId: string, customName: string) => {
+    if (!kmzData) return;
+    setProcessedBlob(null);
+    setIsSuccess(false);
+
+    setKmzData(prev => {
+      if (!prev) return null;
+      const updatedPins = prev.pins.map(pin => {
+        if (pin.id === pinId) {
+          return {
+            ...pin,
+            isMatch: true,
+            userOverride: 'rename' as const,
+            customPreviewName: customName,
+            previewName: customName,
+          };
+        }
+        return pin;
+      });
+      return { ...prev, pins: updatedPins };
+    });
+  };
+
+  const handleResetPinOverrides = () => {
+    if (!kmzData) return;
+    setProcessedBlob(null);
+    setIsSuccess(false);
+
+    const clearedPins = kmzData.pins.map(p => ({
+      ...p,
+      userOverride: undefined,
+      customPreviewName: undefined,
+    }));
+
+    const recalculated = updatePinPreviews(
+      clearedPins,
+      projectId,
+      targetStyle,
+      renameCameras,
+      cameraPrefix,
+      useMultiProject,
+      projectIds,
+      stripStudy
+    );
+
+    setKmzData({
+      ...kmzData,
+      pins: recalculated,
+    });
   };
 
   // Download final processed file
@@ -231,7 +371,7 @@ export default function App() {
             </div>
             <div>
               <h1 className="text-base font-bold text-white tracking-tight">
-                GEO-ID <span className="text-cyan-400 font-normal">RENAMER</span>
+                GEO-ID <span className="text-cyan-400 font-normal">LABELER</span>
               </h1>
               <p className="text-[10px] text-slate-500 uppercase tracking-widest font-semibold">KMZ file Pushpin Project Naming Application</p>
             </div>
@@ -387,7 +527,7 @@ export default function App() {
                      className="w-full bg-slate-900 border border-slate-750 rounded-lg py-2.5 px-4 text-cyan-400 font-mono focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/20 outline-none shadow-inner text-xs"
                    />
                    <div className="flex items-center justify-between text-[10px] text-slate-500">
-                     <span>Suffix prepended to matched pins.</span>
+                     <span>Prefix prepended to matched pins (e.g. <span className="font-mono text-cyan-400">{projectId.trim() || '26-898988'} ATR-004</span>).</span>
                      <div className="flex items-center space-x-1.5">
                        <span className="font-medium text-slate-600">Preset:</span>
                        <button
@@ -444,7 +584,7 @@ export default function App() {
                       className="w-full bg-slate-950 border border-slate-800 rounded-md py-1.5 px-3 text-emerald-400 font-mono focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/20 outline-none text-xs"
                     />
                     <p className="text-[9px] text-slate-500">
-                      Prefix prepended to camera labels. E.g. <span className="font-mono text-emerald-400">CAM-CAM 7099</span>
+                      Prefix prepended with space. E.g. <span className="font-mono text-emerald-400">{cameraPrefix.trim() || 'CAM'} 001 MAIN</span>
                     </p>
                   </motion.div>
                 )}
@@ -687,6 +827,10 @@ export default function App() {
                   projectId={projectId} 
                   selectedPinId={selectedPinId}
                   onSelectPin={setSelectedPinId}
+                  onTogglePinAction={handleTogglePinAction}
+                  onBatchSetPinAction={handleBatchSetPinAction}
+                  onSetCustomPinName={handleSetCustomPinName}
+                  onResetPinOverrides={handleResetPinOverrides}
                 />
               </motion.div>
             ) : (
@@ -727,8 +871,8 @@ export default function App() {
       <footer id="app-footer" className="bg-slate-950 border-t border-slate-800 py-4 shrink-0 text-center text-xs text-slate-500 relative z-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="text-center sm:text-left">
-            <p>© 2026 GEO-ID RENAMER. Powered by React, Vite and Tailwind. All unzipping and processing happens securely inside your browser.</p>
-            <p className="text-[11px] text-slate-600 mt-1">Developed by <span className="text-cyan-500/90 font-semibold">Patrick Franz O.B. & John Mervin B.</span></p>
+            <p>© 2026 GEO-ID LABELER. Powered by React, Vite and Tailwind. All unzipping and processing happens securely inside your browser.</p>
+            <p className="text-[11px] text-slate-600 mt-1">Developed by <span className="text-cyan-500/90 font-semibold">Patrick Franz O.B.</span></p>
           </div>
           <div className="flex gap-6 uppercase font-bold text-[10px]">
             <span className="text-slate-600">Terms</span>
