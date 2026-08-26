@@ -3,658 +3,596 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import JSZip from 'jszip';
-import { KMZData, PlacemarkPin, KmlStyle } from '../types';
+import React, { useState, useMemo } from 'react';
+import { 
+  Search, 
+  MapPin, 
+  ArrowRight, 
+  CheckCircle2, 
+  XCircle, 
+  Info, 
+  Filter, 
+  Video, 
+  CheckSquare, 
+  Square, 
+  Edit3, 
+  Check, 
+  X, 
+  RotateCcw,
+  CheckCheck,
+  Ban
+} from 'lucide-react';
+import { PlacemarkPin } from '../types';
 
-/**
- * Resolves all styles and style maps in a KML document to their respective Icon hrefs.
- */
-export function resolveStylesAndIcons(xmlDoc: Document): Record<string, string> {
-  const iconHrefMap: Record<string, string> = {};
-  
-  // 1. Process all <Style> elements
-  const styleNodes = xmlDoc.getElementsByTagName('Style');
-  for (let i = 0; i < styleNodes.length; i++) {
-    const styleNode = styleNodes[i];
-    const id = styleNode.getAttribute('id');
-    if (!id) continue;
-    
-    const iconStyle = styleNode.getElementsByTagName('IconStyle')[0];
-    if (iconStyle) {
-      const icon = iconStyle.getElementsByTagName('Icon')[0];
-      if (icon) {
-        const hrefNode = icon.getElementsByTagName('href')[0];
-        if (hrefNode && hrefNode.textContent) {
-          iconHrefMap[id] = hrefNode.textContent.trim();
-        }
-      }
-    }
-  }
-  
-  // 2. Process all <StyleMap> elements to map them to their Style's icon
-  const styleMapNodes = xmlDoc.getElementsByTagName('StyleMap');
-  for (let i = 0; i < styleMapNodes.length; i++) {
-    const styleMapNode = styleMapNodes[i];
-    const id = styleMapNode.getAttribute('id');
-    if (!id) continue;
-    
-    const pairs = styleMapNode.getElementsByTagName('Pair');
-    let normalStyleUrl = '';
-    let anyStyleUrl = '';
-    
-    for (let j = 0; j < pairs.length; j++) {
-      const pair = pairs[j];
-      const keyNode = pair.getElementsByTagName('key')[0];
-      const styleUrlNode = pair.getElementsByTagName('styleUrl')[0];
-      if (styleUrlNode && styleUrlNode.textContent) {
-        const url = styleUrlNode.textContent.trim();
-        anyStyleUrl = url;
-        if (keyNode && keyNode.textContent?.trim() === 'normal') {
-          normalStyleUrl = url;
-        }
-      }
-    }
-    
-    const targetUrl = normalStyleUrl || anyStyleUrl;
-    if (targetUrl) {
-      const targetId = targetUrl.startsWith('#') ? targetUrl.substring(1) : targetUrl;
-      if (iconHrefMap[targetId]) {
-        iconHrefMap[id] = iconHrefMap[targetId];
-      }
-    }
-  }
-  
-  return iconHrefMap;
-}
-
-/**
- * Gets the actual resolved icon href for a Placemark element.
- */
-export function getPlacemarkIconHref(pm: Element, iconHrefMap: Record<string, string>): string {
-  // Check styleUrl first
-  const styleUrlNode = pm.getElementsByTagName('styleUrl')[0];
-  if (styleUrlNode && styleUrlNode.textContent) {
-    const styleUrl = styleUrlNode.textContent.trim();
-    const styleId = styleUrl.startsWith('#') ? styleUrl.substring(1) : styleUrl;
-    if (iconHrefMap[styleId]) {
-      return iconHrefMap[styleId];
-    }
-  }
-  
-  // Check inline Style
-  const iconStyle = pm.getElementsByTagName('IconStyle')[0];
-  if (iconStyle) {
-    const icon = iconStyle.getElementsByTagName('Icon')[0];
-    if (icon) {
-      const hrefNode = icon.getElementsByTagName('href')[0];
-      if (hrefNode && hrefNode.textContent) {
-        return hrefNode.textContent.trim();
-      }
-    }
-  }
-  
-  return '';
-}
-
-/**
- * Detects the color of standard GE pushpins or paddles.
- */
-export function detectPinColor(styleUrl: string, iconHref: string): string {
-  const text = (styleUrl + '|' + iconHref).toLowerCase();
-  
-  if (text.includes('ylw') || text.includes('yellow')) return 'yellow';
-  if (text.includes('ltblu') || text.includes('cyan') || text.includes('lightblue') || text.includes('palette-4') || text.includes('palette_4')) return 'cyan';
-  if (text.includes('blue') || text.includes('blu') || text.includes('palette-3') || text.includes('palette_3')) return 'blue';
-  if (text.includes('grn') || text.includes('green') || text.includes('palette-2') || text.includes('palette_2')) return 'green';
-  if (text.includes('pink') || text.includes('palette-5') || text.includes('palette_5')) return 'pink';
-  if (text.includes('purple') || text.includes('palette-6') || text.includes('palette_6')) return 'purple';
-  if (text.includes('red') || text.includes('palette-1') || text.includes('palette_1')) return 'red';
-  if (text.includes('wht') || text.includes('white') || text.includes('palette-7') || text.includes('palette_7')) return 'white';
-  
-  return 'unknown';
-}
-
-/**
- * Strips the study prefix from a pin name (e.g. ATR-001 -> 001).
- * It removes leading alphabets followed by standard separators.
- */
-export function stripStudyPrefix(name: string): string {
-  const stripped = name.replace(/^[a-zA-Z]+[-_ \s]+/, '');
-  return stripped.trim() !== '' ? stripped : name;
-}
-
-/**
- * Formats the renamed label for a pin according to naming conventions:
- * - Camera pins: uses space separator, e.g. "CAM 001 MAIN"
- * - Standard placemarks with No Study Label ON: uses dash separator, e.g. "26-898988-004"
- * - Standard placemarks with No Study Label OFF: uses space separator, e.g. "26-898988 ATR-004"
- */
-export function formatRenamedPin(
-  originalName: string,
-  projectId: string,
-  isCamera: boolean,
-  cameraPrefix: string = '',
-  stripStudy: boolean = false
-): string {
-  if (isCamera) {
-    const cleanPrefix = cameraPrefix.trim();
-    if (!cleanPrefix) return originalName;
-    if (originalName.startsWith(`${cleanPrefix} `) || originalName.startsWith(`${cleanPrefix}-`)) {
-      return originalName;
-    }
-    return `${cleanPrefix} ${originalName}`;
-  }
-
-  const cleanId = projectId.trim();
-  if (!cleanId) return originalName;
-
-  if (stripStudy) {
-    const baseName = stripStudyPrefix(originalName);
-    if (baseName.startsWith(`${cleanId}-`)) {
-      return baseName;
-    }
-    return `${cleanId}-${baseName}`;
-  } else {
-    if (originalName.startsWith(`${cleanId} `) || originalName.startsWith(`${cleanId}-`)) {
-      return originalName;
-    }
-    return `${cleanId} ${originalName}`;
-  }
-}
-
-/**
- * Checks if a pin is a camera/movie icon.
- */
-export function isCameraIcon(name: string, iconHref: string): boolean {
-  const nameLower = name.toLowerCase();
-  const hrefLower = iconHref.toLowerCase();
-  return nameLower.includes('cam ') || 
-         nameLower.includes('cam-') || 
-         nameLower.includes('cam_') || 
-         nameLower.startsWith('cam') || 
-         hrefLower.includes('movies') || 
-         hrefLower.includes('camera') || 
-         hrefLower.includes('video') || 
-         hrefLower.includes('film');
-}
-
-/**
- * Checks if a pin is a standard pushpin or paddle icon from screenshots.
- */
-export function isPushpinIcon(styleUrl: string, iconHref: string): boolean {
-  const urlLower = styleUrl.toLowerCase();
-  const hrefLower = iconHref.toLowerCase();
-  
-  // Standard colors for standard pushpin icons shown in the screenshot:
-  // yellow (ylw), blue (blu), green (grn), cyan (ltblu), pink (pink), purple (purple), red (red), white (wht)
-  const standardColors = [
-    'ylw', 'yellow', 
-    'blue', 'blu', 
-    'grn', 'green', 
-    'ltblu', 'cyan', 
-    'pink', 
-    'purple', 
-    'red', 
-    'wht', 'white'
-  ];
-  
-  // Explicitly check for camera/movies/shapes to be completely safe
-  if (hrefLower.includes('movies') || hrefLower.includes('camera') || hrefLower.includes('play') || hrefLower.includes('video') || hrefLower.includes('shapes') || hrefLower.includes('track') || hrefLower.includes('trail')) {
-    return false;
-  }
-  
-  // If there's an active icon href, it MUST be a pushpin or paddle
-  if (hrefLower !== '') {
-    const isPushpinOrPaddle = hrefLower.includes('pushpin') || 
-                              hrefLower.includes('paddle') || 
-                              hrefLower.includes('palette-') || 
-                              hrefLower.includes('palette_');
-    if (!isPushpinOrPaddle) {
-      return false; // It has an active icon, and it's NOT a pushpin or paddle! (e.g. movies.png)
-    }
-    // Also must contain a standard color
-    return standardColors.some(color => hrefLower.includes(color));
-  }
-  
-  // If there is no active icon href resolved, we look at the styleUrl
-  const hasPushpinStyle = urlLower.includes('pushpin') || 
-                          urlLower.includes('paddle') || 
-                          urlLower.includes('palette-') || 
-                          urlLower.includes('palette_');
-  if (!hasPushpinStyle) {
-    return false;
-  }
-  return standardColors.some(color => urlLower.includes(color));
-}
-
-/**
- * Checks if a pin is a match based on targetStyle setting.
- */
-export function checkIsMatch(styleUrl: string, iconHref: string, targetStyle: string, hasPointGeom: boolean, isCamera: boolean): boolean {
-  // If this is a camera/movie icon, we MUST NOT match it for renaming.
-  if (isCamera) {
-    return false;
-  }
-
-  // If this Placemark is not a Point (e.g. it is a path, line, polygon, overlay, etc.), we MUST NEVER match it.
-  if (!hasPointGeom) {
-    return false;
-  }
-
-  const isGeneralMode = targetStyle.trim() === '' || 
-                        targetStyle.toLowerCase() === 'pointstylemap20' || 
-                        targetStyle.toLowerCase() === 'pushpin' ||
-                        targetStyle.toLowerCase() === 'pins';
-  
-  if (isGeneralMode) {
-    return isPushpinIcon(styleUrl, iconHref);
-  }
-  
-  // Otherwise, match the specific targetStyle string
-  return styleUrl.toLowerCase().includes(targetStyle.toLowerCase()) || 
-         iconHref.toLowerCase().includes(targetStyle.toLowerCase());
-}
-
-/**
- * Helper to find the closest ancestor element with a specific tag name.
- */
-export function getClosestAncestor(element: Element, tagName: string): Element | null {
-  let parent = element.parentElement;
-  while (parent) {
-    if (parent.tagName === tagName) {
-      return parent;
-    }
-    parent = parent.parentElement;
-  }
-  return null;
-}
-
-/**
- * Parses a KMZ file, extracts its KML files, and returns rich structured data about pins and styles.
- */
-export async function parseKMZFile(
-  file: File,
-  targetStyle: string,
-  projectId: string,
-  renameCameras: boolean = false,
-  cameraPrefix: string = '',
-  useMultiProject: boolean = false,
-  projectIds: string[] = [],
-  stripStudy: boolean = false
-): Promise<KMZData> {
-  try {
-    const zip = await JSZip.loadAsync(file);
-    
-    // Find KML files in the archive
-    const kmlFiles = Object.keys(zip.files).filter(name => name.toLowerCase().endsWith('.kml'));
-    
-    if (kmlFiles.length === 0) {
-      throw new Error('Invalid KMZ file: No KML files found in the archive.');
-    }
-    
-    // Use the first KML file found
-    const kmlFileName = kmlFiles[0];
-    const kmlText = await zip.files[kmlFileName].async('text');
-    
-    const parser = new DOMParser();
-    const xmlDoc = parser.parseFromString(kmlText, 'application/xml');
-    
-    // Check for XML parsing errors
-    const parserError = xmlDoc.getElementsByTagName('parsererror');
-    if (parserError.length > 0) {
-      throw new Error(`Failed to parse XML in ${kmlFileName}: ${parserError[0].textContent}`);
-    }
-    
-    // Resolve KML styles to find icon URLs
-    const iconHrefMap = resolveStylesAndIcons(xmlDoc);
-    
-    // Retrieve all Placemark elements
-    const placemarkNodes = xmlDoc.getElementsByTagName('Placemark');
-    const pins: PlacemarkPin[] = [];
-    const stylesMap: Record<string, number> = {};
-    
-    // Identify all unique folders containing pins (Placemarks with Point) in document order
-    const uniqueFolders: Element[] = [];
-    for (let i = 0; i < placemarkNodes.length; i++) {
-      const pm = placemarkNodes[i];
-      const hasPointGeom = pm.getElementsByTagName('Point').length > 0;
-      if (!hasPointGeom) continue;
-      
-      const folder = getClosestAncestor(pm, 'Folder');
-      if (folder && !uniqueFolders.includes(folder)) {
-        uniqueFolders.push(folder);
-      }
-    }
-    
-    for (let i = 0; i < placemarkNodes.length; i++) {
-      const pm = placemarkNodes[i];
-      
-      // Get pin name (label)
-      const nameNode = pm.getElementsByTagName('name')[0];
-      const name = nameNode ? nameNode.textContent || '' : 'Unnamed Pin';
-      
-      // Check if it has Point geometry
-      const hasPointGeom = pm.getElementsByTagName('Point').length > 0;
-      const isPathOrPolygon = pm.getElementsByTagName('LineString').length > 0 || 
-                              pm.getElementsByTagName('Polygon').length > 0 ||
-                              pm.getElementsByTagName('LinearRing').length > 0 ||
-                              pm.getElementsByTagName('Model').length > 0 ||
-                              pm.getElementsByTagName('GroundOverlay').length > 0;
-      
-      // Disregard non-point overlays/paths (like "Untitled Path") entirely from the pins list
-      if (!hasPointGeom || isPathOrPolygon || name.toLowerCase().includes('untitled path')) {
-        continue;
-      }
-      
-      // Get style URL
-      const styleUrlNode = pm.getElementsByTagName('styleUrl')[0];
-      const styleUrl = styleUrlNode ? styleUrlNode.textContent || '' : '';
-      
-      // Get coordinates
-      const coordNode = pm.getElementsByTagName('coordinates')[0];
-      const coordinates = coordNode ? coordNode.textContent?.trim() || '' : undefined;
-      
-      // Get description
-      const descNode = pm.getElementsByTagName('description')[0];
-      const description = descNode ? descNode.textContent || '' : undefined;
-      
-      // Resolve actual icon href and color
-      const iconHref = getPlacemarkIconHref(pm, iconHrefMap);
-      const detectedColor = detectPinColor(styleUrl, iconHref);
-      
-      // Track style frequency
-      if (styleUrl) {
-        stylesMap[styleUrl] = (stylesMap[styleUrl] || 0) + 1;
-      } else {
-        stylesMap['(No Style)'] = (stylesMap['(No Style)'] || 0) + 1;
-      }
-      
-      // Folder grouping & index identification
-      const folderElement = getClosestAncestor(pm, 'Folder');
-      let folderName = '';
-      let folderIndex = -1;
-      if (folderElement) {
-        const fNameNode = folderElement.getElementsByTagName('name')[0];
-        folderName = fNameNode ? fNameNode.textContent || '' : 'Unnamed Folder';
-        folderIndex = uniqueFolders.indexOf(folderElement);
-      }
-
-      // Determine active project ID for this pin based on folder structure and settings
-      let activeProjectId = projectId;
-      if (useMultiProject) {
-        if (folderIndex >= 0 && folderIndex < projectIds.length && projectIds[folderIndex].trim() !== '') {
-          activeProjectId = projectIds[folderIndex].trim();
-        } else {
-          activeProjectId = ''; // No prefix if not provided for this folder
-        }
-      }
-
-      // Determine match and preview name
-      const isCamera = isCameraIcon(name, iconHref);
-      let isMatch = false;
-      let previewName = name;
-
-      if (isCamera) {
-        if (renameCameras && cameraPrefix.trim() !== '') {
-          isMatch = true;
-          previewName = formatRenamedPin(name, '', true, cameraPrefix, false);
-        }
-      } else {
-        isMatch = checkIsMatch(styleUrl, iconHref, targetStyle, hasPointGeom, isCamera);
-        if (isMatch && activeProjectId.trim() !== '') {
-          previewName = formatRenamedPin(name, activeProjectId, false, '', stripStudy);
-        }
-      }
-      
-      pins.push({
-        id: `pin-${i}`,
-        name,
-        styleUrl,
-        iconHref,
-        detectedColor,
-        hasPointGeom,
-        isCamera,
-        coordinates,
-        description,
-        isMatch,
-        previewName,
-        folderName,
-        folderIndex,
-      });
-    }
-    
-    // Format unique styles list sorted by count descending
-    const styles: KmlStyle[] = Object.entries(stylesMap)
-       .map(([styleUrl, count]) => ({ styleUrl, count }))
-       .sort((a, b) => b.count - a.count);
-      
+function getPinColorClasses(color: string, isMatch: boolean) {
+  if (!isMatch) {
     return {
-      fileName: file.name,
-      fileSize: file.size,
-      kmlFileName,
-      pins,
-      styles,
-      zip,
-      xmlDoc,
+      bg: 'bg-slate-900/40 text-slate-500 border border-slate-800/40',
+      text: 'text-slate-500',
     };
-  } catch (error) {
-    console.error('Error parsing KMZ file:', error);
-    throw error instanceof Error ? error : new Error('An error occurred while reading the KMZ file.');
+  }
+  
+  switch (color) {
+    case 'yellow':
+      return { bg: 'bg-yellow-950/40 text-yellow-400 border border-yellow-500/30', text: 'text-yellow-400' };
+    case 'cyan':
+      return { bg: 'bg-cyan-950/40 text-cyan-400 border border-cyan-500/30', text: 'text-cyan-400' };
+    case 'blue':
+      return { bg: 'bg-blue-950/40 text-blue-400 border border-blue-500/30', text: 'text-blue-400' };
+    case 'green':
+      return { bg: 'bg-emerald-950/40 text-emerald-400 border border-emerald-500/30', text: 'text-emerald-400' };
+    case 'pink':
+      return { bg: 'bg-pink-950/40 text-pink-400 border border-pink-500/30', text: 'text-pink-400' };
+    case 'purple':
+      return { bg: 'bg-purple-950/40 text-purple-400 border border-purple-500/30', text: 'text-purple-400' };
+    case 'red':
+      return { bg: 'bg-red-950/40 text-red-400 border border-red-500/30', text: 'text-red-400' };
+    case 'white':
+      return { bg: 'bg-slate-900 text-slate-200 border border-slate-700', text: 'text-slate-200' };
+    default:
+      return { bg: 'bg-cyan-950/40 text-cyan-400 border border-cyan-500/30', text: 'text-cyan-400' };
   }
 }
 
-/**
- * Re-computes previews for already loaded pins based on new project id, multi-project, target style settings, and user overrides.
- */
-export function updatePinPreviews(
-  pins: PlacemarkPin[],
-  projectId: string,
-  targetStyle: string,
-  renameCameras: boolean = false,
-  cameraPrefix: string = '',
-  useMultiProject: boolean = false,
-  projectIds: string[] = [],
-  stripStudy: boolean = false
-): PlacemarkPin[] {
-  return pins.map(pin => {
-    // If user explicitly set customPreviewName without override, preserve it
-    if (pin.customPreviewName && pin.customPreviewName.trim() !== '') {
-      return {
-        ...pin,
-        isMatch: pin.userOverride ? pin.userOverride === 'rename' : true,
-        previewName: pin.customPreviewName,
-      };
-    }
-
-    let isMatch = false;
-    let previewName = pin.name;
-
-    // Determine active project ID for this pin
-    let activeProjectId = projectId;
-    if (useMultiProject) {
-      const folderIdx = pin.folderIndex !== undefined ? pin.folderIndex : -1;
-      if (folderIdx >= 0 && folderIdx < projectIds.length && projectIds[folderIdx].trim() !== '') {
-        activeProjectId = projectIds[folderIdx].trim();
-      } else {
-        activeProjectId = '';
-      }
-    }
-
-    if (pin.isCamera) {
-      if (renameCameras && cameraPrefix.trim() !== '') {
-        isMatch = true;
-      }
-      previewName = formatRenamedPin(pin.name, '', true, cameraPrefix, false);
-    } else {
-      isMatch = checkIsMatch(pin.styleUrl, pin.iconHref, targetStyle, pin.hasPointGeom, pin.isCamera);
-      if (activeProjectId.trim() !== '') {
-        previewName = formatRenamedPin(pin.name, activeProjectId, false, '', stripStudy);
-      }
-    }
-
-    // Respect user manual override if set
-    if (pin.userOverride === 'rename') {
-      isMatch = true;
-    } else if (pin.userOverride === 'skip') {
-      isMatch = false;
-      previewName = pin.name;
-    }
-    
-    return {
-      ...pin,
-      isMatch,
-      previewName,
-    };
-  });
+interface PinListProps {
+  pins: PlacemarkPin[];
+  projectId: string;
+  selectedPinId: string | null;
+  onSelectPin: (id: string | null) => void;
+  onTogglePinAction: (id: string) => void;
+  onBatchSetPinAction: (ids: string[], action: 'rename' | 'skip') => void;
+  onSetCustomPinName: (id: string, customName: string) => void;
+  onResetPinOverrides: () => void;
 }
 
-/**
- * Clones the XML Document and processes the rename, then zips it back up to KMZ and returns a Blob.
- */
-export async function processAndGenerateKMZ(
-  zip: JSZip,
-  xmlDoc: Document,
-  kmlFileName: string,
-  projectId: string,
-  targetStyle: string,
-  renameCameras: boolean = false,
-  cameraPrefix: string = '',
-  useMultiProject: boolean = false,
-  projectIds: string[] = [],
-  stripStudy: boolean = false,
-  pins?: PlacemarkPin[]
-): Promise<Blob> {
-  // Clone the XML document to avoid modifying the original parsed in-memory instance
-  const docClone = xmlDoc.cloneNode(true) as Document;
-  
-  // Resolve styles on the clone to find icon URLs
-  const iconHrefMap = resolveStylesAndIcons(docClone);
-  
-  const placemarkNodes = docClone.getElementsByTagName('Placemark');
-  const cleanId = projectId.trim();
+export function PinList({ 
+  pins, 
+  projectId, 
+  selectedPinId, 
+  onSelectPin,
+  onTogglePinAction,
+  onBatchSetPinAction,
+  onSetCustomPinName,
+  onResetPinOverrides
+}: PinListProps) {
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterMode, setFilterMode] = useState<'all' | 'matched' | 'unmatched' | 'camera'>('all');
+  const [selectedPinIds, setSelectedPinIds] = useState<Set<string>>(new Set());
+  const [editingPinId, setEditingPinId] = useState<string | null>(null);
+  const [editInputVal, setEditInputVal] = useState<string>('');
 
-  // Identify all unique folders containing point placemarks in document order inside clone
-  const uniqueFolders: Element[] = [];
-  for (let i = 0; i < placemarkNodes.length; i++) {
-    const pm = placemarkNodes[i];
-    const hasPointGeom = pm.getElementsByTagName('Point').length > 0;
-    if (!hasPointGeom) continue;
-    
-    const folder = getClosestAncestor(pm, 'Folder');
-    if (folder && !uniqueFolders.includes(folder)) {
-      uniqueFolders.push(folder);
-    }
-  }
+  // Counts
+  const matchedCount = useMemo(() => pins.filter(p => p.isMatch).length, [pins]);
+  const unmatchedCount = useMemo(() => pins.filter(p => !p.isMatch).length, [pins]);
+  const cameraCount = useMemo(() => pins.filter(p => p.isCamera).length, [pins]);
+  const hasManualOverrides = useMemo(() => pins.some(p => p.userOverride !== undefined || p.customPreviewName !== undefined), [pins]);
 
-  // Rename folders in XML if multi-project option is enabled
-  if (useMultiProject) {
-    uniqueFolders.forEach((folderElement, index) => {
-      if (index < projectIds.length && projectIds[index].trim() !== '') {
-        const folderId = projectIds[index].trim();
-        const fNameNode = folderElement.getElementsByTagName('name')[0];
-        if (fNameNode) {
-          fNameNode.textContent = folderId;
-        }
-      }
+  // Filter pins based on search and selected filter mode
+  const filteredPins = useMemo(() => {
+    return pins.filter(pin => {
+      const q = searchQuery.toLowerCase().trim();
+      const matchesSearch =
+        q === '' ||
+        pin.name.toLowerCase().includes(q) ||
+        pin.previewName.toLowerCase().includes(q) ||
+        pin.styleUrl.toLowerCase().includes(q) ||
+        (pin.folderName && pin.folderName.toLowerCase().includes(q));
+        
+      if (!matchesSearch) return false;
+      
+      if (filterMode === 'matched') return pin.isMatch;
+      if (filterMode === 'unmatched') return !pin.isMatch;
+      if (filterMode === 'camera') return pin.isCamera;
+      return true;
     });
-  }
+  }, [pins, searchQuery, filterMode]);
 
-  // Map of pins by ID for fast lookup if pins array is provided
-  const pinMap = new Map<string, PlacemarkPin>();
-  if (pins) {
-    pins.forEach(p => pinMap.set(p.id, p));
-  }
-  
-  for (let i = 0; i < placemarkNodes.length; i++) {
-    const pm = placemarkNodes[i];
-    
-    const nameNode = pm.getElementsByTagName('name')[0];
-    const nameText = nameNode ? nameNode.textContent || '' : '';
-    
-    // Filter out paths, polygons, overlays and anything containing "Untitled Path"
-    const hasPointGeom = pm.getElementsByTagName('Point').length > 0;
-    const isPathOrPolygon = pm.getElementsByTagName('LineString').length > 0 || 
-                            pm.getElementsByTagName('Polygon').length > 0 ||
-                            pm.getElementsByTagName('LinearRing').length > 0 ||
-                            pm.getElementsByTagName('Model').length > 0 ||
-                            pm.getElementsByTagName('GroundOverlay').length > 0;
-    
-    if (!hasPointGeom || isPathOrPolygon || nameText.toLowerCase().includes('untitled path')) {
-      continue;
-    }
+  // Selection helpers
+  const allFilteredSelected = filteredPins.length > 0 && filteredPins.every(p => selectedPinIds.has(p.id));
+  const someFilteredSelected = filteredPins.some(p => selectedPinIds.has(p.id)) && !allFilteredSelected;
 
-    const pinId = `pin-${i}`;
-    const interactivePin = pinMap.get(pinId);
-
-    if (interactivePin) {
-      if (interactivePin.isMatch) {
-        if (nameNode) {
-          nameNode.textContent = interactivePin.customPreviewName || interactivePin.previewName;
-        }
-      } else {
-        if (nameNode) {
-          nameNode.textContent = interactivePin.name;
-        }
-      }
-      continue;
-    }
-    
-    const styleUrlNode = pm.getElementsByTagName('styleUrl')[0];
-    const styleUrlText = styleUrlNode ? styleUrlNode.textContent || '' : '';
-    const iconHref = getPlacemarkIconHref(pm, iconHrefMap);
-    const isCamera = isCameraIcon(nameText, iconHref);
-
-    // Determine active project ID for this placemark
-    let activeProjectId = cleanId;
-    if (useMultiProject) {
-      const folderElement = getClosestAncestor(pm, 'Folder');
-      if (folderElement) {
-        const folderIndex = uniqueFolders.indexOf(folderElement);
-        if (folderIndex >= 0 && folderIndex < projectIds.length && projectIds[folderIndex].trim() !== '') {
-          activeProjectId = projectIds[folderIndex].trim();
-        } else {
-          activeProjectId = '';
-        }
-      }
-    }
-    
-    if (isCamera) {
-      if (renameCameras && cameraPrefix.trim() !== '') {
-        if (nameNode) {
-          nameNode.textContent = formatRenamedPin(nameText, '', true, cameraPrefix, false);
-        }
-      }
+  const handleToggleSelectAll = () => {
+    if (allFilteredSelected) {
+      // Unselect all filtered
+      const next = new Set(selectedPinIds);
+      filteredPins.forEach(p => next.delete(p.id));
+      setSelectedPinIds(next);
     } else {
-      if (checkIsMatch(styleUrlText, iconHref, targetStyle, hasPointGeom, isCamera)) {
-        if (nameNode && activeProjectId !== '') {
-          nameNode.textContent = formatRenamedPin(nameText, activeProjectId, false, '', stripStudy);
-        }
-      }
+      // Select all filtered
+      const next = new Set(selectedPinIds);
+      filteredPins.forEach(p => next.add(p.id));
+      setSelectedPinIds(next);
     }
-  }
-  
-  // Serialize KML back to text string
-  const serializer = new XMLSerializer();
-  const modifiedKmlText = serializer.serializeToString(docClone);
-  
-  // Create a new JSZip or reuse the loaded zip but overwrite the KML
-  const outputZip = new JSZip();
-  
-  // Copy all files from original zip except the KML file which we replace with the modified version
-  for (const [filename, zipEntry] of Object.entries(zip.files)) {
-    if (filename === kmlFileName) {
-      outputZip.file(filename, modifiedKmlText);
-    } else if (!zipEntry.dir) {
-      const content = await zipEntry.async('blob');
-      outputZip.file(filename, content);
+  };
+
+  const handleTogglePinSelect = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const next = new Set(selectedPinIds);
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
     }
-  }
-  
-  // Generate the zip blob
-  return await outputZip.generateAsync({
-    type: 'blob',
-    mimeType: 'application/vnd.google-earth.kmz',
-    compression: 'DEFLATE',
-    compressionOptions: { level: 9 },
-  });
+    setSelectedPinIds(next);
+  };
+
+  // Batch action executions
+  const handleBatchRenameSelected = () => {
+    const ids = Array.from<string>(selectedPinIds);
+    if (ids.length > 0) {
+      onBatchSetPinAction(ids, 'rename');
+      setSelectedPinIds(new Set());
+    }
+  };
+
+  const handleBatchSkipSelected = () => {
+    const ids = Array.from<string>(selectedPinIds);
+    if (ids.length > 0) {
+      onBatchSetPinAction(ids, 'skip');
+      setSelectedPinIds(new Set());
+    }
+  };
+
+  // Inline edit handlers
+  const handleStartEdit = (pin: PlacemarkPin, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingPinId(pin.id);
+    setEditInputVal(pin.customPreviewName || pin.previewName || pin.name);
+  };
+
+  const handleSaveEdit = (pinId: string, e?: React.MouseEvent | React.FormEvent) => {
+    if (e) e.stopPropagation();
+    if (editInputVal.trim()) {
+      onSetCustomPinName(pinId, editInputVal.trim());
+    }
+    setEditingPinId(null);
+  };
+
+  const handleCancelEdit = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setEditingPinId(null);
+  };
+
+  return (
+    <div id="pins-list-container" className="bg-slate-950/40 border border-slate-800 rounded-xl shadow-inner flex flex-col h-[540px] backdrop-blur-sm">
+      {/* Header & Controls */}
+      <div className="p-4 border-b border-slate-800 space-y-3 shrink-0">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
+              <span>Placemarks Directory</span>
+              {hasManualOverrides && (
+                <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-cyan-950/60 text-cyan-400 border border-cyan-800/50 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"></span>
+                  Custom Overrides Active
+                </span>
+              )}
+            </h3>
+            <p className="text-xs text-slate-500">
+              Showing {filteredPins.length} of {pins.length} pins ({matchedCount} to rename, {unmatchedCount} skipped)
+            </p>
+          </div>
+          
+          {/* Quick filters */}
+          <div className="flex items-center space-x-1 bg-slate-900 p-0.5 rounded-lg text-[11px] font-medium border border-slate-800 shrink-0 self-start sm:self-auto">
+            <button
+              id="filter-all"
+              type="button"
+              onClick={() => setFilterMode('all')}
+              className={`px-2 py-1 rounded-md transition-all ${
+                filterMode === 'all'
+                  ? 'bg-slate-800 text-slate-200 shadow-inner font-semibold'
+                  : 'text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              All ({pins.length})
+            </button>
+            <button
+              id="filter-matched"
+              type="button"
+              onClick={() => setFilterMode('matched')}
+              className={`px-2 py-1 rounded-md transition-all ${
+                filterMode === 'matched'
+                  ? 'bg-cyan-950/40 text-cyan-400 shadow-inner font-bold'
+                  : 'text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              Matched ({matchedCount})
+            </button>
+            <button
+              id="filter-unmatched"
+              type="button"
+              onClick={() => setFilterMode('unmatched')}
+              className={`px-2 py-1 rounded-md transition-all ${
+                filterMode === 'unmatched'
+                  ? 'bg-slate-800 text-slate-300 shadow-inner'
+                  : 'text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              Unmatched ({unmatchedCount})
+            </button>
+            {cameraCount > 0 && (
+              <button
+                id="filter-camera"
+                type="button"
+                onClick={() => setFilterMode('camera')}
+                className={`px-2 py-1 rounded-md transition-all ${
+                  filterMode === 'camera'
+                    ? 'bg-emerald-950/40 text-emerald-400 shadow-inner font-bold'
+                    : 'text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                Cameras ({cameraCount})
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Search Input & Batch Action Toolbar */}
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" />
+            <input
+              id="pin-search"
+              type="text"
+              placeholder="Search pins by label, preview, folder, or style..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-9 pr-8 py-2 text-xs bg-slate-900 border border-slate-700 rounded-lg text-slate-200 focus:outline-none focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-colors"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2.5 top-2.5 text-slate-500 hover:text-slate-300 p-0.5"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          {/* Quick All-action toggle buttons */}
+          <div className="flex items-center space-x-1 shrink-0">
+            <button
+              id="quick-rename-all-btn"
+              type="button"
+              title="Set all filtered pins to Rename"
+              onClick={() => onBatchSetPinAction(filteredPins.map(p => p.id), 'rename')}
+              className="px-2 py-2 text-xs bg-slate-900 hover:bg-cyan-950/40 text-slate-400 hover:text-cyan-400 border border-slate-800 hover:border-cyan-800/50 rounded-lg transition-all flex items-center gap-1 font-medium"
+            >
+              <CheckCheck className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Rename All</span>
+            </button>
+            <button
+              id="quick-skip-all-btn"
+              type="button"
+              title="Set all filtered pins to Skip"
+              onClick={() => onBatchSetPinAction(filteredPins.map(p => p.id), 'skip')}
+              className="px-2 py-2 text-xs bg-slate-900 hover:bg-slate-850 text-slate-400 hover:text-slate-300 border border-slate-800 rounded-lg transition-all flex items-center gap-1 font-medium"
+            >
+              <Ban className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Skip All</span>
+            </button>
+            {hasManualOverrides && (
+              <button
+                id="quick-reset-overrides-btn"
+                type="button"
+                title="Reset manual overrides to default detection"
+                onClick={onResetPinOverrides}
+                className="px-2 py-2 text-xs bg-cyan-950/30 hover:bg-cyan-950/60 text-cyan-400 border border-cyan-800/40 rounded-lg transition-all flex items-center gap-1 font-medium"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span className="hidden md:inline">Reset</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Batch Selection Banner (when pins are selected) */}
+        {selectedPinIds.size > 0 && (
+          <div className="flex items-center justify-between bg-cyan-950/30 border border-cyan-500/30 rounded-lg px-3 py-1.5 text-xs text-cyan-300 animate-fadeIn">
+            <div className="flex items-center space-x-2">
+              <span className="font-bold">{selectedPinIds.size}</span>
+              <span>pin{selectedPinIds.size > 1 ? 's' : ''} selected</span>
+            </div>
+            <div className="flex items-center space-x-2">
+              <button
+                type="button"
+                onClick={handleBatchRenameSelected}
+                className="px-2.5 py-1 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold rounded text-[11px] shadow-sm flex items-center gap-1 transition-all"
+              >
+                <Check className="w-3 h-3" />
+                Set to Rename
+              </button>
+              <button
+                type="button"
+                onClick={handleBatchSkipSelected}
+                className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-slate-300 font-semibold border border-slate-700 rounded text-[11px] flex items-center gap-1 transition-all"
+              >
+                <X className="w-3 h-3" />
+                Set to Skip
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedPinIds(new Set())}
+                className="text-slate-400 hover:text-slate-200 text-[11px] underline ml-1"
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Pins Directory List Header Bar */}
+      <div className="px-4 py-1.5 bg-slate-900/60 border-b border-slate-800/80 flex items-center justify-between text-[10px] font-semibold text-slate-400 shrink-0">
+        <div className="flex items-center space-x-2.5">
+          <button
+            type="button"
+            onClick={handleToggleSelectAll}
+            className="flex items-center space-x-1.5 hover:text-slate-200 text-slate-400 transition-colors cursor-pointer"
+            title={allFilteredSelected ? 'Deselect all filtered pins' : 'Select all filtered pins'}
+          >
+            {allFilteredSelected ? (
+              <CheckSquare className="w-3.5 h-3.5 text-cyan-400" />
+            ) : someFilteredSelected ? (
+              <div className="w-3.5 h-3.5 rounded bg-cyan-500/20 border border-cyan-400 flex items-center justify-center">
+                <div className="w-1.5 h-1.5 bg-cyan-400 rounded-sm"></div>
+              </div>
+            ) : (
+              <Square className="w-3.5 h-3.5 text-slate-600" />
+            )}
+            <span>Select All</span>
+          </button>
+        </div>
+        <span className="text-slate-500 uppercase tracking-wider">Click button to toggle Rename / Skip</span>
+      </div>
+
+      {/* Pins Directory List */}
+      <div className="flex-1 overflow-y-auto p-2 space-y-1.5 bg-slate-950/10">
+        {filteredPins.length > 0 ? (
+          filteredPins.map((pin) => {
+            const isSelected = pin.id === selectedPinId;
+            const isChecked = selectedPinIds.has(pin.id);
+            const isEditing = editingPinId === pin.id;
+
+            return (
+              <div
+                key={pin.id}
+                onClick={() => onSelectPin(pin.id)}
+                className={`p-3 rounded-lg border transition-all flex items-center justify-between cursor-pointer select-none group ${
+                  isSelected
+                    ? 'bg-cyan-950/30 border-cyan-400 shadow-[0_0_12px_rgba(6,182,212,0.15)] scale-[1.008]'
+                    : isChecked
+                      ? 'bg-slate-900/70 border-cyan-500/40 shadow-sm'
+                      : pin.isMatch
+                        ? 'bg-slate-900/40 border-cyan-500/20 hover:border-cyan-500/40 hover:bg-slate-900/60 shadow-sm'
+                        : pin.isCamera
+                          ? 'bg-slate-900/15 border-slate-800 hover:border-emerald-800/40 hover:bg-slate-900/30'
+                          : 'bg-slate-900/20 border-slate-800/80 hover:border-slate-700 hover:bg-slate-900/40 shadow-sm'
+                }`}
+              >
+                <div className="flex items-center space-x-3 min-w-0 flex-1">
+                  {/* Select Checkbox */}
+                  <button
+                    type="button"
+                    onClick={(e) => handleTogglePinSelect(pin.id, e)}
+                    className="shrink-0 text-slate-500 hover:text-cyan-400 transition-colors p-0.5"
+                    title={isChecked ? 'Unselect pin' : 'Select pin'}
+                  >
+                    {isChecked ? (
+                      <CheckSquare className="w-4 h-4 text-cyan-400" />
+                    ) : (
+                      <Square className="w-4 h-4 text-slate-600 group-hover:text-slate-400" />
+                    )}
+                  </button>
+
+                  {/* Custom icon indicating color/type and match */}
+                  {pin.isCamera ? (
+                    <div className="p-2 rounded-lg shrink-0 bg-emerald-950/40 text-emerald-400 border border-emerald-900/40">
+                      <Video className="w-4 h-4" />
+                    </div>
+                  ) : (
+                    <div className={`p-2 rounded-lg shrink-0 ${
+                      pin.isMatch 
+                        ? getPinColorClasses(pin.detectedColor, true).bg 
+                        : getPinColorClasses(pin.detectedColor, false).bg
+                    }`}>
+                      <MapPin className="w-4 h-4" />
+                    </div>
+                  )}
+
+                  {/* Name and preview details */}
+                  <div className="min-w-0 flex-1 pr-3">
+                    {isEditing ? (
+                      <form 
+                        onSubmit={(e) => handleSaveEdit(pin.id, e)}
+                        className="flex items-center space-x-1.5"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <input
+                          type="text"
+                          value={editInputVal}
+                          onChange={(e) => setEditInputVal(e.target.value)}
+                          autoFocus
+                          className="px-2 py-0.5 text-xs bg-slate-900 border border-cyan-500 rounded text-slate-100 focus:outline-none w-full max-w-xs font-semibold"
+                          placeholder="Enter custom renamed label..."
+                        />
+                        <button
+                          type="button"
+                          onClick={(e) => handleSaveEdit(pin.id, e)}
+                          className="p-1 bg-cyan-500 hover:bg-cyan-400 text-slate-950 rounded transition-colors"
+                          title="Save custom name"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleCancelEdit}
+                          className="p-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded transition-colors"
+                          title="Cancel"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </form>
+                    ) : (
+                      <div className="flex items-center space-x-2 flex-wrap">
+                        {pin.isMatch && pin.previewName !== pin.name ? (
+                          <div className="flex items-center space-x-1.5 text-xs font-semibold text-slate-300 truncate">
+                            <span className="text-slate-500 line-through truncate max-w-[80px] md:max-w-[130px] inline-block" title={`Original: ${pin.name}`}>
+                              {pin.name}
+                            </span>
+                            <ArrowRight className="w-3 h-3 text-cyan-400 shrink-0" />
+                            <span className="text-cyan-400 bg-cyan-950/40 px-1.5 py-0.5 rounded border border-cyan-800/30 truncate font-semibold">
+                              {pin.previewName}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className={`text-xs font-semibold truncate ${pin.isCamera ? 'text-emerald-300/90' : 'text-slate-200'}`}>
+                            {pin.name}
+                          </span>
+                        )}
+
+                        {/* Edit Button for manual custom rename */}
+                        <button
+                          type="button"
+                          onClick={(e) => handleStartEdit(pin, e)}
+                          className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-cyan-400 p-0.5 transition-all"
+                          title="Edit custom label for this pin"
+                        >
+                          <Edit3 className="w-3 h-3" />
+                        </button>
+
+                        {/* Manual override badge */}
+                        {pin.userOverride && (
+                          <span className="text-[8px] uppercase tracking-wider font-extrabold px-1 rounded bg-cyan-950 text-cyan-400 border border-cyan-800/40">
+                            Manual
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    
+                    {/* Metadata Badges */}
+                    <div className="flex items-center space-x-2 mt-1 flex-wrap gap-y-1">
+                      {pin.folderName && (
+                        <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-slate-900 text-slate-400 border border-slate-800 flex items-center shrink-0">
+                          <span className="w-1 h-1 rounded-full bg-cyan-400/80 mr-1.5 inline-block"></span>
+                          {pin.folderName}
+                        </span>
+                      )}
+                      <span className="font-mono text-[9px] text-slate-400 bg-slate-800 px-1 py-0.5 rounded truncate max-w-[140px]" title={`Style: ${pin.styleUrl}`}>
+                        {pin.styleUrl || '(Inline Style)'}
+                      </span>
+                      {pin.isCamera ? (
+                        <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded uppercase tracking-wider shrink-0 bg-emerald-950/60 text-emerald-400 border border-emerald-500/20">
+                          Camera / Movie
+                        </span>
+                      ) : pin.detectedColor && pin.detectedColor !== 'unknown' ? (
+                        <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded uppercase tracking-wider shrink-0 ${
+                          pin.detectedColor === 'yellow' ? 'bg-yellow-950/60 text-yellow-400 border border-yellow-500/20' :
+                          pin.detectedColor === 'blue' ? 'bg-blue-950/60 text-blue-400 border border-blue-500/20' :
+                          pin.detectedColor === 'green' ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-500/20' :
+                          pin.detectedColor === 'cyan' ? 'bg-cyan-950/60 text-cyan-400 border border-cyan-500/20' :
+                          pin.detectedColor === 'pink' ? 'bg-pink-950/60 text-pink-400 border border-pink-500/20' :
+                          pin.detectedColor === 'purple' ? 'bg-purple-950/60 text-purple-400 border border-purple-500/20' :
+                          pin.detectedColor === 'red' ? 'bg-red-950/60 text-red-400 border border-red-500/20' :
+                          'bg-slate-800 text-slate-300 border border-slate-700'
+                        }`}>
+                          {pin.detectedColor} pin
+                        </span>
+                      ) : null}
+                      {pin.coordinates && (
+                        <span className="text-[9px] text-slate-500 truncate">
+                          Coord: {pin.coordinates.split(',').slice(0, 2).join(',')}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Interactive Action Toggle Button */}
+                <div className="shrink-0 text-right">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onTogglePinAction(pin.id);
+                    }}
+                    className={`inline-flex items-center px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer shadow-sm ${
+                      pin.isMatch
+                        ? 'bg-cyan-950/80 hover:bg-rose-950/60 text-cyan-300 hover:text-rose-300 border border-cyan-500/40 hover:border-rose-500/40'
+                        : pin.isCamera
+                          ? 'bg-slate-900/80 hover:bg-emerald-950/60 text-slate-400 hover:text-emerald-300 border border-slate-800 hover:border-emerald-500/40'
+                          : 'bg-slate-900/80 hover:bg-cyan-950/60 text-slate-400 hover:text-cyan-300 border border-slate-800 hover:border-cyan-500/40'
+                    }`}
+                    title={pin.isMatch ? 'Click to Skip this pin' : 'Click to Rename this pin'}
+                  >
+                    {pin.isMatch ? (
+                      <>
+                        <CheckCircle2 className="w-3.5 h-3.5 mr-1.5 text-cyan-400" />
+                        <span>Rename</span>
+                      </>
+                    ) : pin.isCamera ? (
+                      <>
+                        <XCircle className="w-3.5 h-3.5 mr-1.5 text-slate-500" />
+                        <span>Skip Camera</span>
+                      </>
+                    ) : (
+                      <>
+                        <XCircle className="w-3.5 h-3.5 mr-1.5 text-slate-500" />
+                        <span>Skip</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            );
+          })
+        ) : (
+          <div className="flex flex-col items-center justify-center py-16 text-slate-500 space-y-2 h-full">
+            <Info className="w-6 h-6 text-slate-600" />
+            <p className="text-xs font-medium">No pins found matching search/filter</p>
+          </div>
+        )}
+      </div>
+
+      {/* Legend / Info Footer */}
+      <div className="p-3 border-t border-slate-800 bg-slate-950/60 text-[10px] text-slate-500 flex items-center justify-between shrink-0 rounded-b-xl">
+        <span className="flex items-center">
+          <Filter className="w-3.5 h-3.5 mr-1 text-slate-500" />
+          Legend:
+        </span>
+        <div className="flex items-center space-x-4 font-semibold">
+          <span className="flex items-center">
+            <span className="w-2 h-2 rounded-full bg-cyan-400 mr-1.5 inline-block shadow-[0_0_6px_#06b6d4]"></span>
+            Will Rename ({matchedCount})
+          </span>
+          <span className="flex items-center">
+            <span className="w-2 h-2 rounded-full bg-slate-600 mr-1.5 inline-block"></span>
+            Keep original ({unmatchedCount})
+          </span>
+        </div>
+      </div>
+    </div>
+  );
 }
