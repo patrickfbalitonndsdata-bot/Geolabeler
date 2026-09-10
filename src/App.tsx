@@ -371,7 +371,7 @@ export default function App() {
             </div>
             <div>
               <h1 className="text-base font-bold text-white tracking-tight">
-                SCH GEO-ID <span className="text-cyan-400 font-normal">Renamer</span>
+                GEO-ID <span className="text-cyan-400 font-normal">RENAMER</span>
               </h1>
               <p className="text-[10px] text-slate-500 uppercase tracking-widest font-semibold">KMZ file Pushpin Project Naming Application</p>
             </div>
@@ -596,7 +596,7 @@ export default function App() {
               <div className="flex items-center justify-between">
                 <div className="flex flex-col">
                   <span className="text-xs font-semibold text-slate-300">No Study Label</span>
-                  <span className="text-[10px] text-slate-500">Strip study codes (e.g. ATR, TMC, QUE, etc.) from matched pin names</span>
+                  <span className="text-[10px] text-slate-500">Remove all study codes & alphabets (e.g. TMC, ATR, P&B, QUE) from matched pin names</span>
                 </div>
                 <label htmlFor="strip-study-toggle" className="relative inline-flex items-center cursor-pointer">
                   <input
@@ -619,7 +619,7 @@ export default function App() {
                     transition={{ duration: 0.15 }}
                     className="text-[9px] text-slate-400 bg-slate-950/40 p-2 rounded border border-slate-850"
                   >
-                    E.g. <span className="line-through text-rose-400 font-mono">ATR-001</span> becomes <span className="font-mono text-cyan-400">{projectId.trim() || '26-999999'}-001</span>
+                    E.g. <span className="line-through text-rose-400 font-mono">ATR-001</span> or <span className="line-through text-rose-400 font-mono">P&B-004</span> becomes <span className="font-mono text-cyan-400">{projectId.trim() || '26-999999'}-001</span>
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -871,7 +871,7 @@ export default function App() {
       <footer id="app-footer" className="bg-slate-950 border-t border-slate-800 py-4 shrink-0 text-center text-xs text-slate-500 relative z-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="text-center sm:text-left">
-            <p>© 2026 SCH GEO-ID Renamer. Powered by React, Vite and Tailwind. All unzipping and processing happens securely inside your browser.</p>
+            <p>© 2026 GEO-ID RENAMER. Powered by React, Vite and Tailwind. All unzipping and processing happens securely inside your browser.</p>
             <p className="text-[11px] text-slate-600 mt-1">Developed by <span className="text-cyan-500/90 font-semibold">Patrick Franz O.B.</span></p>
           </div>
           <div className="flex gap-6 uppercase font-bold text-[10px]">
