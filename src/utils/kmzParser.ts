@@ -119,8 +119,13 @@ export function detectPinColor(styleUrl: string, iconHref: string): string {
  * It removes leading alphabets followed by standard separators.
  */
 export function stripStudyPrefix(name: string): string {
-  const stripped = name.replace(/^[a-zA-Z]+[-_ \s]+/, '');
-  return stripped.trim() !== '' ? stripped : name;
+  let stripped = name.replace(/[a-zA-Z&]+/g, '');
+  stripped = stripped
+    .replace(/-+/g, '-')
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s\-_/\\.:,;+&|#]+/, '')
+    .replace(/[\s\-_/\\.:,;+&|#]+$/, '');
+  return stripped.trim() !== '' ? stripped.trim() : name;
 }
 
 /**
